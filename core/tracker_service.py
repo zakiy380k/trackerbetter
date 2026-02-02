@@ -9,7 +9,7 @@ class TrackerService:
         self.session_manager = session_manager
 
     async def notify(self, user_id: int, text: str):
-        await self.bot.send_message(user_id, text)
+        await self.bot.send_message(user_id, text, parse_mode ="HTML")
 
     async def start(self, user_id: int, target: str):
         if tasks.is_tracker_running(user_id):

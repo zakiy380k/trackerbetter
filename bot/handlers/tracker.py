@@ -21,7 +21,7 @@ def setup_tracker_handlers(tracker_service):
     
         try:
             await tracker_service.start(message.from_user.id, target)
-            await message.answer("✅ Tracker successfully started")
+            await message.answer("✅ Трекер запущен")
         except RuntimeError as e:
             await message.answer(str(e))
 

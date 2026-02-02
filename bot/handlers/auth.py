@@ -10,10 +10,10 @@ auth_service = AuthService()
 
 _auth_service = None
 
-def setup_auth_handlers(shared_session_manager):
+def setup_auth_handlers(shared_auth_service):
     global _auth_service
     # Здесь мы связываем хендлеры с общим менеджером сессий
-    _auth_service = shared_session_manager
+    _auth_service = shared_auth_service
 
 @router.callback_query(lambda c: c.data == "login")
 async def start_login(call: CallbackQuery, state: FSMContext):

@@ -4,14 +4,16 @@ from config import BOT_TOKEN
 from bot.handlers import start, terms, auth, tracker
 from core.tracker_service import TrackerService
 from core.session_manager import SessionManager
+from core.auth_service import AuthService
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
 session_manager = SessionManager()
 tracker_service = TrackerService(bot, session_manager)
+auth_service = AuthService()
 
 tracker.setup_tracker_handlers(tracker_service)
-auth.setup_auth_handlers(session_manager)
+auth.setup_auth_handlers(auth_service)
 
 
 dp.include_router(tracker.router)

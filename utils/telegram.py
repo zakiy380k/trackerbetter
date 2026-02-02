@@ -42,6 +42,6 @@ def parse_status(entity):
         return "offline", local_time
 
     if isinstance(status, UserStatusRecently):
-        return "offline_recent", None
+        return "recently", None
 
     return "unknown", None
