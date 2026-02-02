@@ -41,3 +41,8 @@ class TrackerService:
         )
 
         tasks.start_tracker(user_id, coro)
+
+    async def stop(self, user_id:int):
+        stopped = tasks.stop_tracker(user_id)
+        if not stopped:
+            raise RuntimeError("❗ У тебя нет запущенного трекера")

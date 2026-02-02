@@ -9,7 +9,7 @@ def setup_tracker_handlers(tracker_service):
     async def start_tracker_handler(message: Message):
         parts = message.text.split(maxsplit=1)
     
-        if len(parts) < 2:
+        if len(parts) < 2 or not parts[1].strip:
             await message.answer(
                 "❗ Укажи цель\n"
                 "/tracker username\n"
@@ -25,3 +25,11 @@ def setup_tracker_handlers(tracker_service):
         except RuntimeError as e:
             await message.answer(str(e))
 
+    @router.message(Command("stop"))
+    async def stop_tracker_handler(message:Message):
+        user_id = message.from_user.id
+        try:
+            await tracker_service.stop(user_id)
+
+        except RuntimeError as e:
+            await message.answer(str(e))

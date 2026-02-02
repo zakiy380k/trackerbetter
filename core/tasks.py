@@ -11,10 +11,13 @@ def start_tracker(user_id: int, coro):
     _tasks[user_id] = task
 
 
-def stop_tracker(user_id: int):
+def stop_tracker(user_id: int) -> bool:
     task = _tasks.pop(user_id, None)
     if task:
         task.cancel()
+        return True
+    
+    return False
 
 
 def is_tracker_running(user_id: int) -> bool:
