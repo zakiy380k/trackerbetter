@@ -23,7 +23,7 @@ class SessionManager:
         session_file = self.session_path(user_id)
 
         if not session_file.exists():
-            raise Exception("Session file not found(")
+            return None
         
         client = TelegramClient(
             session=str(session_file),
@@ -36,7 +36,10 @@ class SessionManager:
 
         if not await client.is_user_authorized():
             await client.disconnect()
-            raise Exception("User is not authorized")
+            return None
+        
+        self.clients[user_id] = client
+        return client
 
 
     async def logout(self, user_id:int):

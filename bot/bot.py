@@ -11,6 +11,8 @@ session_manager = SessionManager()
 tracker_service = TrackerService(bot, session_manager)
 
 tracker.setup_tracker_handlers(tracker_service)
+auth.setup_auth_handlers(session_manager)
+
 
 dp.include_router(tracker.router)
 dp.include_router(start.router)

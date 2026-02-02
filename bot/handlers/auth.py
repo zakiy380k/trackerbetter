@@ -8,7 +8,12 @@ from bot.keyboards.code_keyboard import build_code_keyboard
 router = Router()
 auth_service = AuthService()
 
+_auth_service = None
 
+def setup_auth_handlers(shared_session_manager):
+    global _auth_service
+    # Здесь мы связываем хендлеры с общим менеджером сессий
+    _auth_service = shared_session_manager
 
 @router.callback_query(lambda c: c.data == "login")
 async def start_login(call: CallbackQuery, state: FSMContext):
@@ -22,7 +27,7 @@ async def handle_phone(message: Message, state: FSMContext):
     phone = message.text.strip()
     user_id = message.from_user.id
 
-    phone_code_hash = await auth_service.send_code(user_id, phone)
+    phone_code_hash = await _auth_service.send_code(user_id, phone)
 
     await state.update_data(phone=phone, phone_code_hash=phone_code_hash)
     await state.set_state(AuthState.code)
@@ -37,7 +42,7 @@ async def handle_code(message:Message, state: FSMContext):
     code = message.text.strip()
     user_id = message.from_user.id
 
-    await auth_service.sign_in(user_id,phone, 
+    await _auth_service.sign_in(user_id,phone, 
                                code, 
                                phone_code_hash)
 
