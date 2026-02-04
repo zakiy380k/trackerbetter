@@ -28,6 +28,7 @@ async def start_command_handler(message: Message):
             reply_markup=agreement_kb
         )
     else:
-        await message.answer("✅ Ты уже авторизован. Можно запускать трекер. /tracker")
+        await message.answer("✅ Ты уже авторизован. Можно запускать трекер.\n"\
+                             "Начните работу с ботом через /tracker или /savemod_on")
 
 

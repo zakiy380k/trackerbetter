@@ -111,7 +111,8 @@ async def handle_confirm(call: CallbackQuery, state: FSMContext):
             await state.clear()
 
             await call.message.edit_text(
-                "✅ Авторизация успешна!"
+                "✅ Авторизация успешна!\n" \
+                "Начните работу с ботом через /tracker или /savemod_on"
             )
         if result == "PASSWORD_REQUIRED":
             await state.set_state(AuthState.password)
@@ -135,7 +136,8 @@ async def handle_password(message: Message, state: FSMContext):
     try:
         await auth_service.sign_in_with_password(user_id, password)
         await state.clear()
-        await message.answer("✅ Авторизация завершена!")
+        await message.answer("✅ Авторизация завершена!\n"\
+        "Начните работу с ботом через /tracker или /savemod_on")
 
     except Exception:
         await message.answer("❌ Неверный пароль. Попробуйте ещё раз.")
