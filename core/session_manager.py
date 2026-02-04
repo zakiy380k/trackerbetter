@@ -32,11 +32,12 @@ class SessionManager:
             flood_sleep_threshold=60
         )
 
-        await client.connect()
+        # await client.connect()
+        await client.start()
 
-        if not await client.is_user_authorized():
-            await client.disconnect()
-            return None
+        # if not await client.is_user_authorized():
+        #     await client.disconnect()
+        #     return None
         
         self.clients[user_id] = client
         return client

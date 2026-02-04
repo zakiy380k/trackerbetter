@@ -2,6 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from core.session_manager import SessionManager
 
+
 router = Router()
 session_manager = SessionManager()
 
@@ -11,8 +12,11 @@ agreement_kb = InlineKeyboardMarkup(
     ]
 )
 
+
+
 @router.message(F.text == "/start")
 async def start_command_handler(message: Message):
+
     user_id = message.from_user.id
 
     if not session_manager.has_session(user_id):

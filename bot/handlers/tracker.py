@@ -4,7 +4,7 @@ from aiogram.types import Message
 
 router = Router()
 
-def setup_tracker_handlers(tracker_service):
+def setup_tracker_handlers(tracker_service, savemod_service):
     @router.message(Command("tracker"))
     async def start_tracker_handler(message: Message):
         parts = message.text.split(maxsplit=1)
@@ -33,3 +33,9 @@ def setup_tracker_handlers(tracker_service):
 
         except RuntimeError as e:
             await message.answer(str(e))
+
+
+    @router.message(F.text == "/savemod_on")
+    async def savemod_on_handler(message: Message):
+        await savemod_service.enable(message.from_user.id)
+        await message.answer("✅ SaveMod включён")
