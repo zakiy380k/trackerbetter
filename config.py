@@ -1,11 +1,13 @@
-import pytz
+import os
 from pytz import timezone, UTC
 
-API_ID = 23776048
-API_HASH = "c853ea0c74a98a3724369c6db058d8cb"
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
 
-BOT_TOKEN = "8418446543:AAGYM7-DqPNrr8GfRVYcAawRqqbeKh0HCdM"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+WEBHOOK_PATH = "/telegram/webhook"
 
-LOCAL_TZ = timezone("Europe/Kyiv")  # или твой часовой пояс
+LOCAL_TZ = timezone("Europe/Kyiv")
 UTC_TZ = UTC
