@@ -4,3 +4,4 @@ uvicorn
 SQLAlchemy
 aiosqlite
 pytz
+telethon
