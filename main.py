@@ -62,3 +62,9 @@ async def telegram_webhook(request: Request):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.api_route("/", methods=["GET", "POST"])
+async def root():
+    return {"status": "alive"}
+
