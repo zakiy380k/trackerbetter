@@ -1,3 +1,5 @@
+from db.init_db import init_db
+
 import asyncio
 from fastapi import FastAPI, Request
 
@@ -26,6 +28,7 @@ savemod_service = SaveModService(bot, session_manager)
 # --- Setup handlers ---
 tracker.setup_tracker_handlers(tracker_service, savemod_service,)
 auth.setup_auth_handlers(auth_service)
+start.setup_start_handlers(session_manager)
 
 dp.include_router(start.router)
 dp.include_router(terms.router)
@@ -38,9 +41,11 @@ app = FastAPI()
 
 @app.on_event("startup")
 async def on_startup():
+    # Инициализация базы данных
+    await init_db()
     # Устанавливаем webhook
     await bot.set_webhook(WEBHOOK_URL + WEBHOOK_PATH)
-
+    await session_manager.restore_all_sessions()
     me = await bot.get_me()
     print(f"WEBHOOK SET for @{me.username}: {WEBHOOK_URL + WEBHOOK_PATH}")
 

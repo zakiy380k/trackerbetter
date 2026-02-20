@@ -22,11 +22,9 @@ class UserSession(Base):
     phone = Column(String, nullable=True)
 
     # имя session-файла Telethon
-    session_name = Column(String, nullable=False)
+    session_string = Column(Text, nullable=True)
 
-    # включён ли SaveMod
     savemod_enabled = Column(Boolean, default=False)
-
 
 class SavedMessage(Base):
     __tablename__ = "saved_messages"

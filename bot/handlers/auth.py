@@ -5,8 +5,9 @@ from bot.states.auth import AuthState
 from core.auth_service import AuthService
 from bot.keyboards.code_keyboard import build_code_keyboard
 
+
 router = Router()
-auth_service = AuthService()
+
 
 _auth_service = None
 
@@ -100,7 +101,7 @@ async def handle_confirm(call: CallbackQuery, state: FSMContext):
         return
 
     try:
-        result = await auth_service.sign_in(
+        result = await _auth_service.sign_in(
             user_id=user_id,
             phone=phone,
             code=code,
@@ -134,7 +135,7 @@ async def handle_password(message: Message, state: FSMContext):
     user_id = message.from_user.id
 
     try:
-        await auth_service.sign_in_with_password(user_id, password)
+        await _auth_service.sign_in_with_password(user_id, password)
         await state.clear()
         await message.answer("✅ Авторизация завершена!\n"\
         "Начните работу с ботом через /tracker или /savemod_on")
