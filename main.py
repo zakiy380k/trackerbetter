@@ -49,7 +49,7 @@ async def on_startup():
     me = await bot.get_me()
     print(f"WEBHOOK SET for @{me.username}: {WEBHOOK_URL + WEBHOOK_PATH}")
 
-@app.head("/")
+@app.head("/health")
 async def head_root():
     return Response(status_code=200)    
 
