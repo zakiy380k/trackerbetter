@@ -5,3 +5,4 @@ SQLAlchemy
 aiosqlite
 pytz
 telethon
+dotenv
