@@ -1,7 +1,7 @@
 from db.init_db import init_db
 
 import asyncio
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 
 from aiogram import Bot, Dispatcher
 
@@ -49,6 +49,9 @@ async def on_startup():
     me = await bot.get_me()
     print(f"WEBHOOK SET for @{me.username}: {WEBHOOK_URL + WEBHOOK_PATH}")
 
+@app.head("/")
+async def head_root():
+    return Response(status_code=200)    
 
 @app.on_event("shutdown")
 async def on_shutdown():
@@ -68,6 +71,9 @@ async def telegram_webhook(request: Request):
 async def health():
     return {"status": "ok"}
 
+@app.get("/")
+async def root():
+    return {"status": "alive"}
 
 @app.api_route("/", methods=["GET", "POST"])
 async def root():
