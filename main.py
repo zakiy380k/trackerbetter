@@ -13,6 +13,10 @@ from core.session_manager import SessionManager
 from core.tracker_service import TrackerService
 from core.auth_service import AuthService
 from core.savemod_service  import  SaveModService
+
+from sqlalchemy import select
+from db.models import UserSession
+from db.session import AsyncSessionLocal
 # если есть SaveModService — подключишь аналогично
 
 # --- Bot & Dispatcher ---
@@ -41,11 +45,30 @@ app = FastAPI()
 
 @app.on_event("startup")
 async def on_startup():
-    # Инициализация базы данных
+    # 1. Инициализация базы данных
     await init_db()
-    # Устанавливаем webhook
+    
+    # 2. Устанавливаем webhook
     await bot.set_webhook(WEBHOOK_URL + WEBHOOK_PATH)
+    
+    # 3. Восстанавливаем сессии
     await session_manager.restore_all_sessions()
+    
+    # 4. ВАЖНО: Синхронизируем SaveModService с восстановленными клиентами
+    # Проходим по всем активным клиентам и вешаем хендлеры только один раз
+    for user_id, client in session_manager.clients.items():
+        # Проверяем в БД, включен ли был сейвмод для этого юзера
+        async with AsyncSessionLocal() as session:
+            res = await session.execute(
+                select(UserSession.savemod_enabled).where(UserSession.bot_user_id == user_id)
+            )
+            is_enabled = res.scalar()
+            
+            if is_enabled:
+                savemod_service._attach_handlers(client, user_id)
+                savemod_service._attached_clients.add(user_id)
+                print(f"✅ SaveMod handlers restored for {user_id}")
+
     me = await bot.get_me()
     print(f"WEBHOOK SET for @{me.username}: {WEBHOOK_URL + WEBHOOK_PATH}")
 

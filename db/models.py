@@ -1,3 +1,5 @@
+import datetime
+from datetime import timezone
 from sqlalchemy import (
     Column,
     Integer,
@@ -5,7 +7,8 @@ from sqlalchemy import (
     String,
     Boolean,
     Text,
-    ForeignKey
+    ForeignKey, 
+    DateTime,
 )
 from db.base import Base
 
@@ -24,7 +27,7 @@ class UserSession(Base):
     # имя session-файла Telethon
     session_string = Column(Text, nullable=True)
 
-    savemod_enabled = Column(Boolean, default=False)
+    savemod_enabled = Column(Boolean, default=True)
 
 class SavedMessage(Base):
     __tablename__ = "saved_messages"
@@ -53,3 +56,17 @@ class SavedMessage(Base):
 
     # unix timestamp
     date = Column(Integer)
+
+    file_id = Column(String, nullable=True) 
+
+class UserMessageLog(Base):
+    __tablename__ = "user_message_logs"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger)
+    username = Column(String, nullable=True)
+    chat_id = Column(BigInteger)
+    message_id = Column(BigInteger)
+    text = Column(Text, nullable=True)
+    content_type = Column(String)
+    created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
