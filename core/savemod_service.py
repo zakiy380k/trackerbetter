@@ -59,22 +59,24 @@ class SaveModService:
     async def on_new_message(self, event, client, owner_id):
         if not event.is_private or event.chat_id == 8418446543:
             return
-
-        # Проверка включенности мода
+    
+        # 1. Сначала проверяем, нет ли уже такого сообщения в базе (от другого процесса)
         async with AsyncSessionLocal() as session:
-            res = await session.execute(
-                select(UserSession.savemod_enabled).where(UserSession.bot_user_id == owner_id)
+            exists = await session.execute(
+                select(SavedMessage).where(
+                    SavedMessage.owner_bot_id == owner_id,
+                    SavedMessage.message_id == event.id,
+                    SavedMessage.chat_id == event.chat_id
+                )
             )
-            if not res.scalar():
-                return
-
-        # Сначала обрабатываем медиа, чтобы получить file_id для базы
+            if exists.scalar():
+                return # Если уже есть, выходим
+    
+        # 2. Только после этого работаем с медиа и сохраняем
         media_id = None
         if event.media:
-            # Пересылаем в канал и получаем сообщение от бота, чтобы вытащить file_id
             media_id = await self._forward_and_get_id(event, client, owner_id)
-
-        # Сохраняем в БД (текст + media_id если есть)
+        
         await self._save_to_db(event, owner_id, file_id=media_id)
 
     async def _forward_and_get_id(self, event, client, owner_id):
@@ -180,13 +182,12 @@ class SaveModService:
                     print(f"❌ Не удалось отправить удаленное медиа: {e}")
     # --- ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ---
 
+# В методе _attach_handlers в savemod_service.py
     def _attach_handlers(self, client, bot_user_id: int):
-        """Безопасное навешивание хендлеров с предварительной очисткой"""
-        # Сначала удаляем старые, если они были (защита от дублей)
-        client.remove_event_handler(self.on_new_message)
-        client.remove_event_handler(self.on_deleted)
+        # Проверяем, не вешали ли мы уже хендлеры на этот объект клиента
+        if bot_user_id in self._attached_clients:
+            return 
 
-        # Добавляем заново
         client.add_event_handler(
             lambda e: self.on_new_message(e, client, bot_user_id), 
             events.NewMessage
@@ -195,6 +196,7 @@ class SaveModService:
             lambda e: self.on_deleted(e, client, bot_user_id), 
             events.MessageDeleted
         )
+        self._attached_clients.add(bot_user_id) # Фиксируем подключение
 
     async def _handle_media_forward(self, event, client, owner_id):
         try:
