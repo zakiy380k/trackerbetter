@@ -45,10 +45,14 @@ def setup_tracker_handlers(tracker_service, savemod_service):
 
     @router.message(F.text == "/savemod_on")
     async def savemod_on_handler(message: Message):
-        await savemod_service.enable(message.from_user.id)
-        await message.answer("✅ SaveMod включён. Что бы выключить напишите /savemod_off")
+        try:
+            await savemod_service.enable(message.from_user.id)
+            await message.answer("✅ SaveMod включён. Что бы выключить напишите /savemod_off")
+        except RuntimeError as e:
+            await message.answer(str(e))
+
     @router.message(F.text == "/savemod_off")
-    async def savemod_on_handler(message: Message):
+    async def savemod_off_handler(message: Message):
         await savemod_service.disable(message.from_user.id)
         await message.answer("❌SaveMod выключен. Что бы включить напишите /savemod_on")
 # bot/handlers/tracker.py
