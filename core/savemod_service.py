@@ -19,9 +19,21 @@ class SaveModService:
         self._names_cache = {} # Кэш имен для ускорения экспорта
 
     async def enable(self, bot_user_id: int):
+        # 1. Пытаемся получить клиент
         client = await self.session_manager.get_client(bot_user_id)
+        
+        # 2. Если клиент не найден в памяти, пробуем восстановить его из БД
+        if client is None:
+            # Эта попытка заставит SessionManager заглянуть в БД и переподключить сессию
+            client = await self.session_manager.get_client(bot_user_id)
+            
+        # 3. Если и после этого клиента нет — значит сессии реально не существует (нужен /auth)
         if client is None:
             raise RuntimeError("❌ Сначала авторизуйся (/auth)")
+
+        # 4. Проверяем статус соединения (на случай, если клиент "завис")
+        if not client.is_connected():
+            await client.connect()
 
         async with AsyncSessionLocal() as session:
             result = await session.execute(
@@ -34,7 +46,7 @@ class SaveModService:
             user.savemod_enabled = True
             await session.commit()
 
-        # Принудительно переподключаем хендлеры, чтобы избежать дублей или "засыпания"
+        # Подключаем хендлеры
         self._attach_handlers(client, bot_user_id)
         self._attached_clients.add(bot_user_id)
 
