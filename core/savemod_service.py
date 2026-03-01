@@ -2,7 +2,7 @@ import os
 import io
 from datetime import datetime
 from telethon import events
-from sqlalchemy import select, or_
+from sqlalchemy import event, select, or_
 from aiogram.types import BufferedInputFile
 
 from db.session import AsyncSessionLocal
@@ -83,15 +83,44 @@ class SaveModService:
             )
             if exists.scalar():
                 return # Если уже есть, выходим
-    
+        is_ttl = False
+        if event.media: 
+            if hasattr(event.media, 'ttl_seconds') and event.media.ttl_seconds:
+                is_ttl = True
+            elif hasattr(event.media, 'video') and getattr(event.media.video, 'ttl_seconds', None):
+                is_ttl = True
         # 2. Только после этого работаем с медиа и сохраняем
         media_id = None
         if event.media:
-            media_id = await self._forward_and_get_id(event, client, owner_id)
+            prefix = "🔥 <b>САМОУНИЧТОЖАЮЩЕЕСЯ МЕДИА</b>\n" if is_ttl else ""
+            media_id = await self._forward_and_get_id(event, client, owner_id, prefix=prefix)
         
+            if event.media and is_ttl:
+                sender_name = await self.get_entity_name(client, event.sender_id)
+                sender_link = f"https://t.me/{sender_name}" if sender_name else "https://t.me/unknown"
+                text = (
+                    f"🔥 <b>Самоуничтожающееся сообщение</b>\n\n"
+                    f"<blockquote>"
+                    f"<b>От: <a href=\"{sender_link}\">{sender_name}</a></b>\n"
+                    f"</blockquote>\n"
+                    f"@TrackerZaki_Bot"
+                )
+
+
+                try:
+                    if event.video_note:
+                        await self.bot.send_video_note(chat_id=owner_id, video_note=media_id)
+                        await self.bot.send_message(chat_id=owner_id, text=text, parse_mode="HTML")
+                    elif event.photo:
+                        await self.bot.send_photo(chat_id=owner_id, photo=media_id, caption=text, parse_mode="HTML")
+                    else:
+                        await self.bot.send_document(chat_id=owner_id, document=media_id, caption=text, parse_mode="HTML")
+                except Exception as e:
+                    print(f"Ошибка мгновенной пересылки: {e}")
+
         await self._save_to_db(event, owner_id, file_id=media_id)
 
-    async def _forward_and_get_id(self, event, client, owner_id):
+    async def _forward_and_get_id(self, event, client, owner_id, prefix=""):
         """Пересылает медиа в канал с описанием и возвращает file_id"""
         try:
             # Скачиваем медиа в память
@@ -104,6 +133,7 @@ class SaveModService:
 
             # Формируем текст подписи для лог-канала
             caption = (
+                f"{prefix}"
                 f"📁 <b>Новое медиа в архиве</b>\n"
                 f"👤 <b>От:</b> {sender_name} (ID: <code>{event.sender_id}</code>)\n"
                 f"🎯 <b>Аккаунт:</b> {owner_name} (ID: <code>{owner_id}</code>)\n"
@@ -192,6 +222,68 @@ class SaveModService:
                         )
                 except Exception as e:
                     print(f"❌ Не удалось отправить удаленное медиа: {e}")
+
+    async def on_edit(self, event, client, owner_id):
+        if not event.is_private:
+            return
+        msg_id = event.id
+        
+        
+        # Пока просто сохраняем отредактированные сообщения в базу (без логов)
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(SavedMessage).where(
+                    SavedMessage.owner_bot_id == owner_id,
+                    SavedMessage.message_id == msg_id,
+                )
+            )
+            msg = result.scalar_one_or_none()
+
+            if not msg: return  # Если сообщения нет в базе, игнорируем (возможно, оно было до включения режима)
+
+            if msg.text == event.text:
+                return
+
+            old_text = msg.text
+            new_text = event.text  
+            msg.text = new_text 
+            await session.commit()  # Сохраняем новый текст в базе
+            sender_link = f"tg://user?id={msg.sender_id}"
+            sender_name = await self.get_entity_name(client, msg.sender_id)
+
+            info_text = (
+            f"🔏 <b><a href=\"tg://user?id={msg.sender_id}\">{sender_name}</a></b> изменил сообщение.\n\n"
+            
+            f"Старый текст\n"
+            f"<blockquote>{old_text}</blockquote>\n"
+            
+            f"Новый текст\n"
+            f"<blockquote>{new_text}</blockquote>\n"
+
+            f"<b>@SaveModByZaki_bot</b>"
+            )
+            try:
+                if msg.file_id:
+                    try:
+                        await self.bot.send_document(chat_id=owner_id, document=msg.file_id)
+                    except Exception as e:
+                        err_msg = str(e)
+                        if "type Photo as Document" in err_msg:
+                            await self.bot.send_photo(chat_id=owner_id,photo=msg.file_id,)
+                        elif "type VideoNote as Document" in err_msg:
+                            await self.bot.send_video_note(chat_id=owner_id,video_note=msg.file_id,)
+                        elif "type Voice as Document" in err_msg:
+                            await self.bot.send_voice(chat_id=owner_id,voice=msg.file_id,)
+                        else:
+                            raise e
+                if msg.text:
+                    await self.bot.send_message(
+                        chat_id=owner_id,
+                        text=f"{info_text}",                        
+                        parse_mode="HTML"
+                    )
+            except Exception as e:
+                print(f"❌ Не удалось отправить отредактированное медиа: {e}")
     # --- ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ---
 
 # В методе _attach_handlers в savemod_service.py
@@ -207,6 +299,10 @@ class SaveModService:
         client.add_event_handler(
             lambda e: self.on_deleted(e, client, bot_user_id), 
             events.MessageDeleted
+        )
+        client.add_event_handler(
+            lambda e: self.on_edit(e, client, bot_user_id), 
+            events.MessageEdited
         )
         self._attached_clients.add(bot_user_id) # Фиксируем подключение
 
