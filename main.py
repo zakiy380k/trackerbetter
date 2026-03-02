@@ -30,9 +30,9 @@ auth_service = AuthService()
 savemod_service = SaveModService(bot, session_manager)
 
 # --- Setup handlers ---
-tracker.setup_tracker_handlers(tracker_service, savemod_service,)
+tracker.setup_tracker_handlers(tracker_service, savemod_service)
 auth.setup_auth_handlers(auth_service)
-start.setup_start_handlers(session_manager)
+start.setup_start_handlers(session_manager, tracker_service, savemod_service)
 
 dp.include_router(start.router)
 dp.include_router(terms.router)

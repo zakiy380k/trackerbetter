@@ -1,10 +1,12 @@
+from email.mime import message
+
 from aiogram import Router
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from bot.states.auth import AuthState
 from core.auth_service import AuthService
 from bot.keyboards.code_keyboard import build_code_keyboard
-
+import re
 
 router = Router()
 
@@ -25,15 +27,30 @@ async def start_login(call: CallbackQuery, state: FSMContext):
 
 @router.message(AuthState.phone)
 async def handle_phone(message: Message, state: FSMContext):
-    phone = message.text.strip()
+    phone = message.text.strip().replace(" ", "")
     user_id = message.from_user.id
 
-    phone_code_hash = await _auth_service.send_code(user_id, phone)
+    if not re.match(r'^\+\d{10,15}$', phone):
+        await message.answer(
+            "⚠️ <b>Неверный формат номера!</b>\n\n"
+            "Пожалуйста, введите номер в международном формате, "
+            "начиная с плюса, например: <code>+380997403928</code>",
+            parse_mode="HTML"
+        )
+        return
+    try:
+        phone_code_hash = await _auth_service.send_code(user_id, phone)
 
-    await state.update_data(phone=phone, phone_code_hash=phone_code_hash)
-    await state.set_state(AuthState.code)
+        await state.update_data(phone=phone, phone_code_hash=phone_code_hash)
+        await state.set_state(AuthState.code)
 
-    await message.answer("📩 Код отправлен. Введите код из Telegram.", reply_markup=build_code_keyboard())
+        await message.answer("📩 Код отправлен. Введите код из Telegram.", reply_markup=build_code_keyboard())
+    except Exception as e:
+        error_str = str(e).lower()
+        if "phone number is invalid" in error_str or "invalid" in error_str:
+            await message.answer("⚠️ Неверный номер телефона. Попробуйте ещё раз.")
+        else:
+            await message.answer("❌ Ошибка при отправке кода. Попробуйте позже.")
 
 @router.message(AuthState.code)
 async def handle_code(message:Message, state: FSMContext):

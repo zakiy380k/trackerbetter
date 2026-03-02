@@ -260,7 +260,7 @@ class SaveModService:
             f"Новый текст\n"
             f"<blockquote>{new_text}</blockquote>\n"
 
-            f"<b>@SaveModByZaki_bot</b>"
+            f"<b>@TrackerZaki_Bot</b>"
             )
             try:
                 if msg.file_id:
