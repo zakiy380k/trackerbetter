@@ -102,6 +102,7 @@ async def start_command_handler(message: Message):
 
 @router.callback_query(F.data == "toggle_savemod")
 async def callback_toggle_savemod(callback: CallbackQuery):
+    await callback.answer()  # Чтобы убрать "часики" на кнопке
     user_id = callback.from_user.id
     
     async with AsyncSessionLocal() as session:
@@ -113,7 +114,7 @@ async def callback_toggle_savemod(callback: CallbackQuery):
                 await _savemod_service.disable(user_id)
             else:
                 await _savemod_service.enable(user_id)
-    
+
     # СРАЗУ ПОСЛЕ ДЕЙСТВИЯ: обновляем это же сообщение
     await update_profile_message(callback.message, user_id)
     await callback.answer("Настройки SaveMod изменены")

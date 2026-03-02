@@ -17,6 +17,7 @@ class SaveModService:
         self.session_manager = session_manager
         self._attached_clients = set()
         self._names_cache = {} # Кэш имен для ускорения экспорта
+        self._handlers = {}
 
     async def enable(self, bot_user_id: int):
         # 1. Пытаемся получить клиент
@@ -59,7 +60,13 @@ class SaveModService:
             if user:
                 user.savemod_enabled = False
                 await session.commit()
-        
+        client = await self.session_manager.get_client(bot_user_id)
+
+        if client and bot_user_id in self._handlers:
+            for handler in self._handlers[bot_user_id]:
+                client.remove_event_handler(handler)
+            del self._handlers[bot_user_id]
+
         # Удаляем из сета активных, чтобы при следующем включении хендлеры обновились
         if bot_user_id in self._attached_clients:
             self._attached_clients.remove(bot_user_id)
@@ -186,7 +193,7 @@ class SaveModService:
                         f"🗑 Это сообщение было удалено\n\n"
                         f'<blockquote><b><a href="{sender_link}">{sender_name}</a></b>\n'
                         f"{msg.text or 'No Text '}</blockquote>\n"
-                        f"@TrackerZaki_Bot"
+                        f"<b>@TrackerZaki_Bot</b>"
                 )
 
                 try:
@@ -288,23 +295,21 @@ class SaveModService:
 
 # В методе _attach_handlers в savemod_service.py
     def _attach_handlers(self, client, bot_user_id: int):
-        # Проверяем, не вешали ли мы уже хендлеры на этот объект клиента
-        if bot_user_id in self._attached_clients:
-            return 
 
-        client.add_event_handler(
-            lambda e: self.on_new_message(e, client, bot_user_id), 
-            events.NewMessage
-        )
-        client.add_event_handler(
-            lambda e: self.on_deleted(e, client, bot_user_id), 
-            events.MessageDeleted
-        )
-        client.add_event_handler(
-            lambda e: self.on_edit(e, client, bot_user_id), 
-            events.MessageEdited
-        )
-        self._attached_clients.add(bot_user_id) # Фиксируем подключение
+        async def new_msg(event):
+            await self.on_new_message(event, client, bot_user_id)
+
+        async def deleted(event):
+            await self.on_deleted(event, client, bot_user_id)
+
+        async def edited(event):
+            await self.on_edit(event, client, bot_user_id)
+
+        client.add_event_handler(new_msg, events.NewMessage)
+        client.add_event_handler(deleted, events.MessageDeleted)
+        client.add_event_handler(edited, events.MessageEdited)
+
+        self._handlers[bot_user_id] = [new_msg, deleted, edited]
 
     async def _handle_media_forward(self, event, client, owner_id):
         try:

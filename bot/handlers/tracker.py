@@ -125,3 +125,12 @@ def setup_tracker_handlers(tracker_service, savemod_service):
         )
 
         await message.answer(text, parse_mode="HTML")
+
+    @router.message(Command("logout"))
+    async def logout_handler(message: Message):
+        user_id = message.from_user.id
+        try:
+            await savemod_service.session_manager.logout(user_id)
+            await message.answer("✅ Вы успешно вышли из аккаунта.")
+        except Exception as e:
+            await message.answer(f"❌ Ошибка при выходе: {e}")
