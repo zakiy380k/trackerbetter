@@ -28,7 +28,12 @@ class AuthService:
 
         await client.connect()
 
-        result = await client.send_code_request(phone=phone)
+        try:
+            result = await client.send_code_request(phone=phone)
+            print(f"Code sent to {phone}, hash: {result.phone_code_hash}")
+        except Exception as e:
+            print(f"Failed to send code to {phone}: {e}")
+
 
         # сохраняем client (ВАЖНО!)
         self.temp_clients[user_id] = client
