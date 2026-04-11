@@ -29,6 +29,11 @@ tracker_service = TrackerService(bot, session_manager)
 auth_service = AuthService()
 savemod_service = SaveModService(bot, session_manager)
 
+dp["tracker_service"] = tracker_service
+dp["savemod_service"] = savemod_service
+dp["auth_service"] = auth_service
+dp["session_manager"] = session_manager
+
 # --- Setup handlers ---
 tracker.setup_tracker_handlers(tracker_service, savemod_service)
 auth.setup_auth_handlers(auth_service)

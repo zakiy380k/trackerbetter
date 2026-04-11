@@ -397,7 +397,7 @@ class BusinessSaveModService:
                 f"<blockquote>"
                 f"<b><a href=\"tg://user?id={saved.sender_id}\">{sender_name}</a></b>\n"
                 f"{saved.text or ""}"
-                f"</blockquote>\n\n"
+                f"</blockquote>"
                 f"<b>@TrackerZaki_Bot</b>"
             )
 
