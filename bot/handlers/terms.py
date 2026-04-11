@@ -13,7 +13,7 @@ login_kb = InlineKeyboardMarkup(
 async def accept_terms(call: CallbackQuery):
     await call.answer()
     await call.message.edit_text(
-        "✅ Соглашение принято.\n\n"
+        "✅ Соглашение принято(я вас не взломаю(может быть)).\n\n"
         "Следующий шаг — авторизация в Telegram.\n"
         "Нажмите «Войти в аккаунт».",
         reply_markup=login_kb

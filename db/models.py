@@ -7,7 +7,7 @@ from sqlalchemy import (
     String,
     Boolean,
     Text,
-    ForeignKey, 
+    ForeignKey,
     DateTime,
 )
 from db.base import Base
@@ -21,43 +21,41 @@ class UserSession(Base):
     # ID пользователя бота (aiogram)
     bot_user_id = Column(BigInteger, unique=True, nullable=False)
 
-    # телефон Telegram user-account
+    # Телефон (только для full-режима)
     phone = Column(String, nullable=True)
 
-    # имя session-файла Telethon
+    # StringSession Telethon (только для full-режима)
     session_string = Column(Text, nullable=True)
 
     savemod_enabled = Column(Boolean, default=True)
+
+    # "full"     — полная регистрация через Telethon
+    # "business" — Business Connection (только SaveMod, без Telethon)
+    connection_type = Column(String, default="full", nullable=False)
+
+    # ID бизнес-подключения (только для connection_type == "business")
+    business_connection_id = Column(String, nullable=True, index=True)
+
 
 class SavedMessage(Base):
     __tablename__ = "saved_messages"
 
     id = Column(Integer, primary_key=True)
 
-    # чей это аккаунт (ключ для multi-user)
     owner_bot_id = Column(
         BigInteger,
         ForeignKey("user_sessions.bot_user_id"),
         index=True,
-        nullable=False
+        nullable=False,
     )
 
-    # чат Telegram (личка)
     chat_id = Column(BigInteger, index=True)
-
-    # ID сообщения в чате
     message_id = Column(BigInteger, index=True)
-
-    # кто отправил сообщение
     sender_id = Column(BigInteger)
-
-    # текст сообщения
     text = Column(Text)
-
-    # unix timestamp
     date = Column(Integer)
+    file_id = Column(String, nullable=True)
 
-    file_id = Column(String, nullable=True) 
 
 class UserMessageLog(Base):
     __tablename__ = "user_message_logs"
@@ -69,4 +67,6 @@ class UserMessageLog(Base):
     message_id = Column(BigInteger)
     text = Column(Text, nullable=True)
     content_type = Column(String)
-    created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime, default=lambda: datetime.datetime.now(timezone.utc)
+    )

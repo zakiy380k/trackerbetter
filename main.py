@@ -101,4 +101,3 @@ async def root():
 @app.api_route("/", methods=["GET", "POST"])
 async def root():
     return {"status": "alive"}
-
