@@ -31,6 +31,7 @@ class AuthService:
         try:
             result = await client.send_code_request(phone=phone)
             print(f"Code sent to {phone}, hash: {result.phone_code_hash}")
+            print(f"Type of result: {type(result)}")
         except Exception as e:
             print(f"Failed to send code to {phone}: {e}")
 
