@@ -50,6 +50,11 @@ app = FastAPI()
 
 @app.on_event("startup")
 async def on_startup():
+    # В функции on_startup
+    await bot.set_webhook(
+        url=WEBHOOK_URL + WEBHOOK_PATH,
+        allowed_updates=["message", "business_connection", "business_message", "edited_business_message", "deleted_business_messages"]
+    )
     # 1. Инициализация базы данных
     await init_db()
     
