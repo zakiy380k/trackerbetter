@@ -422,6 +422,29 @@ def get_service() -> BusinessSaveModService:
         raise RuntimeError("BusinessSaveModService не инициализирован. Вызови init_business_savemod(bot) при старте.")
     return _service
 
+@router.business_connection()
+async def on_business_connection(connection: BusinessMessagesDeleted, bot: Bot):
+    # Когда юзер подключает бота в настройках ТГ Бизнес
+    if connection.is_enabled:
+        async with AsyncSessionLocal() as session:
+            # Обновляем сессию пользователя, записывая туда ID подключения
+            await session.execute(
+                update(UserSession)
+                .where(UserSession.bot_user_id == connection.user_id)
+                .values(
+                    business_connection_id=connection.id,
+                    connection_type="business"
+                )
+            )
+            await session.commit()
+        
+        # Сразу регистрируем в локальном реестре сервиса, чтобы не ждать перезагрузки
+        get_service().register_connection(connection.id, connection.user_id)
+        
+        await bot.send_message(connection.user_id, "✅ Бизнес-подключение успешно активировано!")
+
+
+
 
 # ─────────────────── ХЕНДЛЕРЫ РОУТЕРА ─────────────────── #
 
