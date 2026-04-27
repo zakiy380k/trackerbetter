@@ -76,13 +76,31 @@ class BusinessSaveModService:
     async def get_entity_name(self, entity_id: int) -> str:
         if not entity_id:
             return "Неизвестно"
+    
         if entity_id in self._names_cache:
             return self._names_cache[entity_id]
+    
         try:
             chat = await self.bot.get_chat(entity_id)
-            name = chat.full_name or f"ID:{entity_id}"
-        except Exception:
+    
+            if chat.full_name:
+                name = chat.full_name
+            elif chat.title:
+                name = chat.title
+            elif chat.username:
+                name = f"@{chat.username}"
+            else:
+                first = chat.first_name or ""
+                last = chat.last_name or ""
+                name = (first + " " + last).strip()
+    
+            if not name:
+                name = f"ID:{entity_id}"
+    
+        except Exception as e:
+            print(f"[get_entity_name] ошибка: {e}")
             name = f"ID:{entity_id}"
+    
         self._names_cache[entity_id] = name
         return name
 
@@ -421,29 +439,6 @@ def get_service() -> BusinessSaveModService:
     if _service is None:
         raise RuntimeError("BusinessSaveModService не инициализирован. Вызови init_business_savemod(bot) при старте.")
     return _service
-
-@router.business_connection()
-async def on_business_connection(connection: BusinessMessagesDeleted, bot: Bot):
-    # Когда юзер подключает бота в настройках ТГ Бизнес
-    if connection.is_enabled:
-        async with AsyncSessionLocal() as session:
-            # Обновляем сессию пользователя, записывая туда ID подключения
-            await session.execute(
-                update(UserSession)
-                .where(UserSession.bot_user_id == connection.user_id)
-                .values(
-                    business_connection_id=connection.id,
-                    connection_type="business"
-                )
-            )
-            await session.commit()
-        
-        # Сразу регистрируем в локальном реестре сервиса, чтобы не ждать перезагрузки
-        get_service().register_connection(connection.id, connection.user_id)
-        
-        await bot.send_message(connection.user_id, "✅ Бизнес-подключение успешно активировано!")
-
-
 
 
 # ─────────────────── ХЕНДЛЕРЫ РОУТЕРА ─────────────────── #
