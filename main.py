@@ -1,9 +1,11 @@
-from db.init_db import init_db
+import os
 import asyncio
 import logging
 from fastapi import FastAPI, Request
 
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.redis import RedisStorage
+from redis.asyncio import Redis
 
 from config import BOT_TOKEN, WEBHOOK_URL, WEBHOOK_PATH
 
@@ -18,13 +20,36 @@ from core.business_savemod_service import init_business_savemod, router as busin
 from db.models import UserSession
 from db.session import AsyncSessionLocal
 from sqlalchemy import select
+from bot.handlers.user_bot_handlers import setup_user_bot_handlers  # если есть
 
-# ====================== Инициализация ======================
+# ====================== REDIS STORAGE ======================
+redis_url = os.getenv("REDIS_URL")
 
+if redis_url:
+    try:
+        redis = Redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_timeout=30,
+            socket_connect_timeout=30
+        )
+        storage = RedisStorage(redis=redis)
+        print("✅ RedisStorage успешно подключён (Persistent)")
+    except Exception as e:
+        print(f"⚠️ Ошибка подключения Redis: {e}")
+        from aiogram.fsm.storage.memory import MemoryStorage
+        storage = MemoryStorage()
+        print("→ Используется MemoryStorage")
+else:
+    from aiogram.fsm.storage.memory import MemoryStorage
+    storage = MemoryStorage()
+    print("⚠️ REDIS_URL не найден → MemoryStorage")
+
+# ====================== BOT & DISPATCHER ======================
 bot = Bot(BOT_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(storage=storage)
 
-# Сервисы
+# ====================== СЕРВИСЫ ======================
 user_bot_service = UserBotService()
 session_manager = SessionManager()
 tracker_service = TrackerService(bot, session_manager)
@@ -32,7 +57,7 @@ auth_service = AuthService()
 savemod_service = SaveModService(bot, session_manager)
 business_service = init_business_savemod(bot)
 
-# Прокидываем в контекст
+# Прокидываем сервисы в контекст
 dp["user_bot_service"] = user_bot_service
 dp["tracker_service"] = tracker_service
 dp["savemod_service"] = savemod_service
@@ -43,16 +68,22 @@ dp["business_savemod_service"] = business_service
 # Настройка хендлеров
 tracker.setup_tracker_handlers(tracker_service, savemod_service)
 auth.setup_auth_handlers(auth_service)
-start.setup_start_handlers(session_manager, tracker_service, savemod_service)
+start.setup_start_handlers(session_manager, tracker_service, savemod_service, user_bot_service)
 
-# Роутеры
+# Если у тебя есть setup для user_bot_handlers
+try:
+    setup_user_bot_handlers(savemod_service, session_manager)
+except:
+    pass
+
+# ====================== РОУТЕРЫ ======================
+dp.include_router(business_router)
 dp.include_router(start.router)
 dp.include_router(terms.router)
 dp.include_router(auth.router)
 dp.include_router(tracker.router)
-dp.include_router(business_router)
 
-# ====================== FastAPI ======================
+# ====================== FASTAPI ======================
 app = FastAPI(title="TrackerZaki Bot")
 
 @app.on_event("startup")
@@ -62,7 +93,10 @@ async def on_startup():
     # Запуск всех пользовательских ботов
     await user_bot_service.load_all_bots()
 
-    # Установка webhook
+    # === Webhook (критично для Render) ===
+    await bot.delete_webhook(drop_pending_updates=True)
+    await asyncio.sleep(1)
+
     await bot.set_webhook(
         url=WEBHOOK_URL + WEBHOOK_PATH,
         allowed_updates=[
@@ -70,7 +104,8 @@ async def on_startup():
             "business_connection", "business_message",
             "edited_business_message", "deleted_business_messages"
         ],
-        drop_pending_updates=True
+        drop_pending_updates=True,
+        max_connections=100
     )
 
     # Загрузка Business Connections
@@ -93,8 +128,9 @@ async def on_startup():
                 savemod_service._attached_clients.add(user_id)
 
     me = await bot.get_me()
-    print(f"✅ Основной бот @{me.username} успешно запущен!")
-    print(f"📊 Активных пользовательских ботов: {len(user_bot_service.running_bots)}")
+    print(f"✅ Основной бот @{me.username} успешно запущен на Render!")
+    print(f"🌐 Webhook: {WEBHOOK_URL + WEBHOOK_PATH}")
+    print(f"📊 Активных UserBots: {len(user_bot_service.running_bots)}")
 
 
 @app.post(WEBHOOK_PATH)
@@ -113,12 +149,27 @@ async def health():
     }
 
 
+@app.get("/restart_webhook")
+async def restart_webhook():
+    """Полезно для UptimeRobot"""
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await asyncio.sleep(1)
+        await bot.set_webhook(
+            url=WEBHOOK_URL + WEBHOOK_PATH,
+            allowed_updates=["message", "callback_query", "business_connection", 
+                           "business_message", "edited_business_message", "deleted_business_messages"],
+            drop_pending_updates=True
+        )
+        return {"status": "ok", "message": "Webhook restarted"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 @app.on_event("shutdown")
 async def on_shutdown():
-    # Останавливаем все пользовательские боты
     for bot_id in list(user_bot_service.running_bots.keys()):
         await user_bot_service.stop_bot(bot_id)
-    
     await bot.session.close()
     print("🛑 Бот остановлен")
 
