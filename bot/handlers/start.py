@@ -1,16 +1,22 @@
+from tracemalloc import start
+
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import (
+    FSInputFile,
     Message,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     CallbackQuery,
     BusinessConnection,
+    CopyTextButton
 )
 from sqlalchemy import select
 
-from db.models import UserSession
+from config import BOT_TOKEN
+from db.models import UserBot, UserSession
 from db.session import AsyncSessionLocal
-from core import tasks
+from core import tasks, user_bot_service
 
 router = Router()
 
@@ -18,21 +24,28 @@ _session_manager = None
 _tracker_service = None
 _savemod_service = None  # Telethon SaveModService (full-режим)
 
+# MAIN_BOT_ID = int(BOT_TOKEN.split(":")[0])
 
-def setup_start_handlers(shared_session_manager, tracker_service, savemod_service):
-    global _session_manager, _tracker_service, _savemod_service
+# router.message.filter(F.bot.id == MAIN_BOT_ID)
+
+def setup_start_handlers(shared_session_manager, tracker_service, savemod_service, user_bot_service):
+    global _session_manager, _tracker_service, _savemod_service, _user_bot_service
     _session_manager = shared_session_manager
     _tracker_service = tracker_service
     _savemod_service = savemod_service
+    _user_bot_service = user_bot_service
 
 
 # ─────────────────────── КЛАВИАТУРЫ ─────────────────────────── #
 
-def get_welcome_keyboard() -> InlineKeyboardMarkup:
+def get_welcome_keyboard(user_id: int, username: str = None) -> InlineKeyboardMarkup:
+    profile_url = f"https://t.me/{username}" if username else f"tg://openmessage?user_id={user_id}"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💼 ТГ Премиум (SaveMod)", callback_data="mode_business")],
-        [InlineKeyboardButton(text="🔐 Без ТГ Премиум (SaveMod + Tracker)", callback_data="agree")],
-        [InlineKeyboardButton(text="📋 Дисклеймер", callback_data="disclamer")],
+        [InlineKeyboardButton(text="Скопировать @username", copy_text=CopyTextButton(text="@TrackerZaki_Bot"))],
+        [InlineKeyboardButton(text="⚙ Профиль", url="tg://settings/")],
+        [InlineKeyboardButton(text="📕 Инструкция", url="https://teletype.in/@zakiiq/yJ1Gx4dEEV5")],
+        [InlineKeyboardButton(text="Подключиться через FullConnection", callback_data="agree")],
+        [InlineKeyboardButton(text="Создать своего бота", callback_data="create_bot")],
     ])
 
 
@@ -40,7 +53,9 @@ def get_profile_keyboard(user: UserSession) -> InlineKeyboardMarkup:
     buttons = []
 
     sm_text = "🔴 Выключить SaveMod" if user.savemod_enabled else "🟢 Включить SaveMod"
-    buttons.append([InlineKeyboardButton(text=sm_text, callback_data="toggle_savemod")])
+    buttons.append(
+        [InlineKeyboardButton(text=sm_text, callback_data="toggle_savemod")])
+    buttons.append([InlineKeyboardButton(text="➕ Добавить бота", callback_data="create_bot")])
 
     # Кнопка трекера только для full-режима и только если запущен
     if getattr(user, 'connection_type', 'full') == "full" and tasks.is_tracker_running(user.bot_user_id):
@@ -51,30 +66,38 @@ def get_profile_keyboard(user: UserSession) -> InlineKeyboardMarkup:
 
 # ─────────────────────── ПРОФИЛЬ ─────────────────────────── #
 
-def _build_profile_text(user_id: int, user: UserSession) -> str:
+# Обновленная функция формирования текста
+def _build_profile_text(user_id: int, user: UserSession, user_bots: list) -> str:
     sm_status = "🟢 Включен" if user.savemod_enabled else "🔴 Выключен"
-
+    
+    # Формируем список ботов
+    bots_list_text = "\n".join([f"• @{b.username}" for b in user_bots]) if user_bots else "<i>нет созданных ботов</i>"
+    
     if getattr(user, 'connection_type', 'full') == "business":
         bc_status = "✅ Активно" if user.business_connection_id else "❌ Неактивно"
-        return (
+        profile_header = (
             "👤 <b>Твой профиль:</b>\n\n"
             f"🆔 ID: <code>{user_id}</code>\n"
             f"💼 Режим: <b>Business Connection</b>\n"
             f"🔗 Подключение: {bc_status}\n"
             f"💾 SaveMod: {sm_status}\n\n"
-            "<b>@TrackerZaki_Bot</b>"
         )
     else:
         tr_status = "🟢 Запущен" if tasks.is_tracker_running(user_id) else "🔴 Остановлен"
-        return (
+        profile_header = (
             "👤 <b>Твой профиль:</b>\n\n"
             f"🆔 ID: <code>{user_id}</code>\n"
             f"🔐 Режим: <b>Полный доступ</b>\n"
             f"💾 SaveMod: {sm_status}\n"
             f"📡 Tracker: {tr_status}\n\n"
-            "<b>@TrackerZaki_Bot</b>"
         )
 
+    return (
+        profile_header +
+        f"🤖 <b>Ваши боты ({len(user_bots)}):</b>\n"
+        f"{bots_list_text}\n\n"
+        "<b>@TrackerZaki_Bot</b>"
+    )
 
 async def safe_edit(message: Message, text: str, reply_markup=None):
     """Редактирует сообщение, игнорируя 'message is not modified'."""
@@ -87,40 +110,48 @@ async def safe_edit(message: Message, text: str, reply_markup=None):
 
 # ─────────────────────── /start ─────────────────────────── #
 
-@router.message(F.text == "/start")
+
+@router.message(Command("start"))
 async def start_command_handler(message: Message):
+
     user_id = message.from_user.id
+    username = message.from_user.username
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(UserSession).where(UserSession.bot_user_id == user_id)
         )
         user = result.scalar_one_or_none()
+        
+        result_bot = await session.execute(
+            select(UserBot).where(UserBot.owner_id == user_id)
+        )
+        my_bots = result_bot.scalars().all()
+
 
     # Уже настроен — показываем профиль
     if user and (user.business_connection_id or user.session_string):
         await message.answer(
-            _build_profile_text(user_id, user),
+            _build_profile_text(user_id, user, my_bots),
             reply_markup=get_profile_keyboard(user),
             parse_mode="HTML",
         )
         return
-
+    photo = FSInputFile("Png/starttutor.png")   # ← путь к файлу
     # Новый пользователь — выбор режима
-    await message.answer(
-        "👋 <b>Добро пожаловать!</b>\n\n"
-        "Выбери режим работы бота:\n\n"
-        "💼 <b>Business Connection (ТГ Премиум)</b>\n"
-        "Подключаешь бота как бизнес-бота в настройках TG. "
-        "SaveMod сохраняет удалённые сообщения из бизнес-чатов.\n\n"
-        "🔐 <b>Полный доступ (без Премиума)</b>\n"
-        "Регистрируешь аккаунт в боте. "
-        "Доступны SaveMod + Трекер активности.\n\n"
-        "🔽 Выбери режим:",
-        reply_markup=get_welcome_keyboard(),
+    # Отправляем приветственное фото + текст
+    await message.answer_photo(
+        photo=photo,
+        caption=(
+            "👋 <b>Привет!</b>\n\n"
+            "Этот бот создан, чтобы дать тебе полный контроль над перепиской в Telegram.\n\n"
+            "• Я присылаю уведомления, когда собеседник <b>удаляет или редактирует сообщения</b>.\n"
+            "• При полном подключении я также <b>сохраняю самоуничтожающиеся фото, видео и голосовые сообщения</b>.\n\n"
+            "Что бы подключить бота, нажмите на кнопку <b>«Скопировать @username»</b> и следуйте инструкции ниже."
+        ),
+        reply_markup=get_welcome_keyboard(user_id=user_id, username=username),
         parse_mode="HTML",
     )
-
 
 # ─────────────────────── ВЫБОР РЕЖИМА ─────────────────────── #
 

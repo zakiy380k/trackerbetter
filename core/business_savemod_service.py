@@ -1,10 +1,6 @@
+# core/business_savemod_service.py
 """
-SaveMod для Business Connection.
-
-ВАЖНО: в aiogram хендлеры нельзя вешать через @router внутри класса —
-декоратор регистрирует функцию до создания экземпляра, self недоступен.
-Решение: хендлеры — обычные функции вне класса, которые вызывают методы
-глобального экземпляра сервиса.
+SaveMod для Business Connection (Универсальный для Multibot режима).
 """
 
 from datetime import datetime
@@ -24,7 +20,7 @@ LOG_CHANNEL_ID = -1003711524247
 
 class BusinessSaveModService:
     def __init__(self, bot: Bot):
-        self.bot = bot
+        self.bot = bot  # Это Главный бот (используется как fallback и для лог-канала)
         self._registry: dict[str, int] = {}     # bc_id → owner_id
         self._names_cache: dict[int, str] = {}  # entity_id → name
 
@@ -73,15 +69,17 @@ class BusinessSaveModService:
             )
             return result.scalar_one_or_none()
 
-    async def get_entity_name(self, entity_id: int) -> str:
+    async def get_entity_name(self, entity_id: int, bot: Bot = None) -> str:
+        """Получает имя чата через переданного активного бота (или главного бота)"""
         if not entity_id:
             return "Неизвестно"
     
         if entity_id in self._names_cache:
             return self._names_cache[entity_id]
     
+        active_bot = bot or self.bot
         try:
-            chat = await self.bot.get_chat(entity_id)
+            chat = await active_bot.get_chat(entity_id)
     
             if chat.full_name:
                 name = chat.full_name
@@ -113,7 +111,7 @@ class BusinessSaveModService:
             )
             return result.scalars().all()
 
-    async def format_logs_to_txt(self, owner_id: int) -> str | None:
+    async def format_logs_to_txt(self, owner_id: int, bot: Bot = None) -> str | None:
         logs = await self.get_user_logs(owner_id)
         if not logs:
             return None
@@ -128,13 +126,13 @@ class BusinessSaveModService:
         out += "=" * 60 + "\n\n"
 
         for chat_id, chat_logs in grouped.items():
-            chat_name = await self.get_entity_name(chat_id)
+            chat_name = await self.get_entity_name(chat_id, bot=bot)
             out += f"👉 ДИАЛОГ С: {chat_name} (ID: {chat_id})\n"
             out += "-" * 40 + "\n"
 
             for log in sorted(chat_logs, key=lambda x: x.date or 0):
                 t = datetime.fromtimestamp(log.date).strftime("%d.%m %H:%M") if log.date else "???"
-                sender_name = await self.get_entity_name(log.sender_id)
+                sender_name = await self.get_entity_name(log.sender_id, bot=bot)
                 p = "[ВЫ]" if log.sender_id == owner_id else "[ОН]"
                 out += f"[{t}] {p} {sender_name}\n"
                 if log.text:
@@ -148,7 +146,6 @@ class BusinessSaveModService:
         return out
 
     def _detect_media_type(self, message: Message) -> str | None:
-        """Определяет тип медиа. video_note ОБЯЗАТЕЛЬНО раньше video."""
         if message.video_note:    return "video_note"
         if message.photo:         return "photo"
         if message.voice:         return "voice"
@@ -160,55 +157,45 @@ class BusinessSaveModService:
         return None
 
     def _check_ttl(self, message: Message) -> bool:
-        """Проверяет самоуничтожающееся медиа."""
         if message.photo and getattr(message.photo[-1], 'ttl_seconds', None):
             return True
         if message.video and getattr(message.video, 'ttl_seconds', None):
             return True
-        # aiogram также может выставить has_media_spoiler для скрытых медиа
         if getattr(message, 'has_media_spoiler', False):
             return True
         return False
 
     async def _save_media_to_log(self, message: Message, owner_id: int, prefix: str = "") -> str | None:
-        """Скачивает медиа, сохраняет в лог-канал, возвращает file_id."""
+        """Скачивает медиа через бота-получателя, льет в канал через Главного бота, возвращает оригинальный file_id."""
         media_type = self._detect_media_type(message)
         if not media_type:
             return None
 
         try:
-            # Определяем объект для скачивания — photo[-1] только если список непустой
-            if media_type == "photo":
-                media_obj = message.photo[-1] if message.photo else None
-            elif media_type == "video_note":
-                media_obj = message.video_note
-            elif media_type == "voice":
-                media_obj = message.voice
-            elif media_type == "video":
-                media_obj = message.video
-            elif media_type == "audio":
-                media_obj = message.audio
-            elif media_type == "document":
-                media_obj = message.document
-            elif media_type == "sticker":
-                media_obj = message.sticker
-            elif media_type == "animation":
-                media_obj = message.animation
-            else:
-                media_obj = None
+            if media_type == "photo": media_obj = message.photo[-1] if message.photo else None
+            elif media_type == "video_note": media_obj = message.video_note
+            elif media_type == "voice": media_obj = message.voice
+            elif media_type == "video": media_obj = message.video
+            elif media_type == "audio": media_obj = message.audio
+            elif media_type == "document": media_obj = message.document
+            elif media_type == "sticker": media_obj = message.sticker
+            elif media_type == "animation": media_obj = message.animation
+            else: media_obj = None
 
             if not media_obj:
                 return None
 
-            file_bytes: BytesIO = await self.bot.download(media_obj)
+            # 🔥 Сохраняем ИСХОДНЫЙ file_id, который понимает текущий бот
+            original_file_id = media_obj.file_id if media_type != "photo" else message.photo[-1].file_id
+
+            # 🔥 Скачиваем строго через message.bot (у кастомного бота свой токен доступа к файлу!)
+            file_bytes: BytesIO = await message.bot.download(media_obj)
             if not file_bytes:
-                return None
+                return original_file_id
 
-            # Читаем байты один раз
             raw = file_bytes.read()
-
             sender_id = message.from_user.id if message.from_user else 0
-            sender_name = await self.get_entity_name(sender_id)
+            sender_name = await self.get_entity_name(sender_id, bot=message.bot)
 
             caption = (
                 f"{prefix}"
@@ -220,44 +207,36 @@ class BusinessSaveModService:
 
             input_file = BufferedInputFile(raw, filename="media")
 
-            # Кружки не поддерживают caption — отправляем отдельным сообщением
+            # 🔥 В лог-канал отправляем ВСЕГДА через Главного бота (self.bot)
             if media_type == "video_note":
-                sent = await self.bot.send_video_note(LOG_CHANNEL_ID, video_note=input_file)
+                await self.bot.send_video_note(LOG_CHANNEL_ID, video_note=input_file)
                 await self.bot.send_message(LOG_CHANNEL_ID, f"☝️ <b>Кружок выше:</b>\n{caption}", parse_mode="HTML")
-                return sent.video_note.file_id
-
-            if media_type == "photo":
-                sent = await self.bot.send_photo(LOG_CHANNEL_ID, photo=input_file, caption=caption, parse_mode="HTML")
-                return sent.photo[-1].file_id
+            elif media_type == "photo":
+                await self.bot.send_photo(LOG_CHANNEL_ID, photo=input_file, caption=caption, parse_mode="HTML")
             elif media_type == "voice":
-                sent = await self.bot.send_voice(LOG_CHANNEL_ID, voice=input_file, caption=caption, parse_mode="HTML")
-                return sent.voice.file_id
+                await self.bot.send_voice(LOG_CHANNEL_ID, voice=input_file, caption=caption, parse_mode="HTML")
             elif media_type == "video":
-                sent = await self.bot.send_video(LOG_CHANNEL_ID, video=input_file, caption=caption, parse_mode="HTML")
-                return sent.video.file_id
+                await self.bot.send_video(LOG_CHANNEL_ID, video=input_file, caption=caption, parse_mode="HTML")
             elif media_type == "audio":
-                sent = await self.bot.send_audio(LOG_CHANNEL_ID, audio=input_file, caption=caption, parse_mode="HTML")
-                return sent.audio.file_id
+                await self.bot.send_audio(LOG_CHANNEL_ID, audio=input_file, caption=caption, parse_mode="HTML")
             else:
-                # document, sticker, animation
-                sent = await self.bot.send_document(LOG_CHANNEL_ID, document=input_file, caption=caption, parse_mode="HTML")
-                return sent.document.file_id
+                await self.bot.send_document(LOG_CHANNEL_ID, document=input_file, caption=caption, parse_mode="HTML")
+
+            # Возвращаем исходный ID для сохранения в БД под этого конкретного бота
+            return original_file_id
 
         except Exception as e:
             print(f"[BusinessSaveMod] Ошибка сохранения медиа: {e}")
-        return None
+            # Если отправка в канал упала, всё равно пытаемся вернуть оригинальный file_id для работы внутри бота
+            try: return media_obj.file_id if media_type != "photo" else message.photo[-1].file_id
+            except: return None
 
-    async def _send_deleted_to_user(self, owner_id: int, saved: SavedMessage, info_text: str):
-        """Отправляет удалённое сообщение владельцу.
-        Если есть медиа — шлём файл с caption (одно сообщение).
-        Кружки caption не поддерживают — там два сообщения неизбежно.
-        Если медиа нет — просто текст.
-        """
+    async def _send_deleted_to_user(self, owner_id: int, saved: SavedMessage, info_text: str, bot: Bot):
+        """Отправляет удалённое сообщение владельцу строго через активного бота (bot)."""
         if not saved.file_id:
-            await self.bot.send_message(owner_id, info_text, parse_mode="HTML")
+            await bot.send_message(owner_id, info_text, parse_mode="HTML")
             return
 
-        # Пробуем отправить с caption — от наиболее вероятного типа
         send_order = [
             ("send_photo",    {"photo":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
             ("send_video",    {"video":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
@@ -268,22 +247,23 @@ class BusinessSaveModService:
 
         for method_name, kwargs in send_order:
             try:
-                await getattr(self.bot, method_name)(owner_id, **kwargs)
+                # 🔥 Вызываем метод у динамического бота (bot)
+                await getattr(bot, method_name)(owner_id, **kwargs)
                 return
             except Exception as e:
                 err = str(e).lower()
-                if any(k in err for k in ["wrong type", "type", "invalid"]):
+                if any(k in err for k in ["wrong type", "type", "invalid remote file"]):
                     continue
                 print(f"[BusinessSaveMod] Не удалось переслать медиа ({method_name}): {e}")
                 break
 
-        # Кружок — caption не поддерживается, шлём отдельно
+        # Кружок
         try:
-            await self.bot.send_video_note(owner_id, video_note=saved.file_id)
-            await self.bot.send_message(owner_id, info_text, parse_mode="HTML")
+            await bot.send_video_note(owner_id, video_note=saved.file_id)
+            await bot.send_message(owner_id, info_text, parse_mode="HTML")
         except Exception as e:
             print(f"[BusinessSaveMod] Fallback video_note тоже упал: {e}")
-            await self.bot.send_message(owner_id, info_text, parse_mode="HTML")
+            await bot.send_message(owner_id, info_text, parse_mode="HTML")
 
     # ─────────────────── ОСНОВНАЯ ЛОГИКА ─────────────────── #
 
@@ -294,7 +274,7 @@ class BusinessSaveModService:
             return
 
         if await self._get_saved(owner_id, message.chat.id, message.message_id):
-            return  # дубль
+            return  
 
         text = message.text or message.caption or ""
         is_ttl = self._check_ttl(message)
@@ -303,19 +283,18 @@ class BusinessSaveModService:
 
         sender_id = message.from_user.id if message.from_user else 0
 
-        # Для TTL — алерт отправляем СРАЗУ, до попытки скачать.
-        # Telegram может не дать скачать TTL медиа через Bot API.
         if is_ttl:
-            sender_name = await self.get_entity_name(sender_id)
+            sender_name = await self.get_entity_name(sender_id, bot=message.bot)
             ttl_text = (
                 f"🔥 <b>Самоуничтожающееся сообщение</b>\n\n"
                 f"<blockquote>"
                 f"<b>От: <a href=\"tg://user?id={sender_id}\">{sender_name}</a></b>\n"
                 f"</blockquote>\n"
-                f"<b>@TrackerZaki_Bot</b>"
+                f"<b>@{message.bot.username or 'Bot'}</b>" # Динамический юзернейм
             )
             try:
-                await self.bot.send_message(chat_id=owner_id, text=ttl_text, parse_mode="HTML")
+                # 🔥 Отправляем через message.bot
+                await message.bot.send_message(chat_id=owner_id, text=ttl_text, parse_mode="HTML")
             except Exception as e:
                 print(f"[BusinessSaveMod] Ошибка отправки TTL алерта: {e}")
 
@@ -323,19 +302,14 @@ class BusinessSaveModService:
         if media_type:
             file_id = await self._save_media_to_log(message, owner_id, prefix)
 
-        # Если удалось скачать TTL медиа — дополнительно шлём сам файл
         if is_ttl and file_id:
             try:
-                if media_type == "video_note":
-                    await self.bot.send_video_note(chat_id=owner_id, video_note=file_id)
-                elif media_type == "photo":
-                    await self.bot.send_photo(chat_id=owner_id, photo=file_id)
-                elif media_type == "voice":
-                    await self.bot.send_voice(chat_id=owner_id, voice=file_id)
-                elif media_type == "video":
-                    await self.bot.send_video(chat_id=owner_id, video=file_id)
-                else:
-                    await self.bot.send_document(chat_id=owner_id, document=file_id)
+                # 🔥 Отправляем через message.bot
+                if media_type == "video_note": await message.bot.send_video_note(chat_id=owner_id, video_note=file_id)
+                elif media_type == "photo": await message.bot.send_photo(chat_id=owner_id, photo=file_id)
+                elif media_type == "voice": await message.bot.send_voice(chat_id=owner_id, voice=file_id)
+                elif media_type == "video": await message.bot.send_video(chat_id=owner_id, video=file_id)
+                else: await message.bot.send_document(chat_id=owner_id, document=file_id)
             except Exception as e:
                 print(f"[BusinessSaveMod] Ошибка пересылки TTL медиа: {e}")
 
@@ -376,15 +350,16 @@ class BusinessSaveModService:
             saved.text = new_text
             await session.commit()
 
-        sender_name = await self.get_entity_name(saved.sender_id)
+        sender_name = await self.get_entity_name(saved.sender_id, bot=message.bot)
 
-        await self.bot.send_message(
+        # 🔥 Отправляем через message.bot
+        await message.bot.send_message(
             owner_id,
             f"🔏 <b>Сообщение отредактировано</b>\n\n"
             f"👤 От: <a href=\"tg://user?id={saved.sender_id}\">{sender_name}</a>\n\n"
             f"Старый:\n<blockquote>{old_text or '<i>пусто</i>'}</blockquote>\n\n"
             f"Новый:\n<blockquote>{new_text}</blockquote>\n\n"
-            f"<b>@TrackerZaki_Bot</b>",
+            f"<b>@{message.bot.username or 'Bot'}</b>",
             parse_mode="HTML",
         )
 
@@ -398,30 +373,30 @@ class BusinessSaveModService:
             saved = await self._get_saved(owner_id, event.chat.id, msg_id)
 
             if not saved:
-                await self.bot.send_message(
+                # 🔥 Отправляем через event.bot
+                await event.bot.send_message(
                     owner_id,
                     f"🗑 Удалено сообщение (ID {msg_id})\n"
                     f"Чат: <code>{event.chat.id}</code>\n"
                     f"<i>Текст не был сохранён</i>\n\n"
-                    f"<b>@TrackerZaki_Bot</b>",
+                    f"<b>@{event.bot.username or 'Bot'}</b>",
                     parse_mode="HTML",
                 )
                 continue
 
-            sender_name = await self.get_entity_name(saved.sender_id)
+            sender_name = await self.get_entity_name(saved.sender_id, bot=event.bot)
 
             info_text = (
                 f"🗑 <b>Удалённое сообщение</b>\n\n"
                 f"<blockquote>"
                 f"<b><a href=\"tg://user?id={saved.sender_id}\">{sender_name}</a></b>\n"
-                f"{saved.text or ""}"
+                f"{saved.text or ''}"
                 f"</blockquote>"
                 f"<b>@TrackerZaki_Bot</b>"
             )
 
-            
-            # Медиа + текст в одном сообщении через caption
-            await self._send_deleted_to_user(owner_id, saved, info_text)
+            # 🔥 Передаем event.bot для отправки медиа/текста
+            await self._send_deleted_to_user(owner_id, saved, info_text, bot=event.bot)
 
 
 # ─────────────────── ГЛОБАЛЬНЫЙ ЭКЗЕМПЛЯР ─────────────────── #
@@ -437,7 +412,7 @@ def init_business_savemod(bot: Bot) -> BusinessSaveModService:
 
 def get_service() -> BusinessSaveModService:
     if _service is None:
-        raise RuntimeError("BusinessSaveModService не инициализирован. Вызови init_business_savemod(bot) при старте.")
+        raise RuntimeError("BusinessSaveModService не инициализирован.")
     return _service
 
 

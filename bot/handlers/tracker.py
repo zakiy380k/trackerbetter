@@ -2,19 +2,89 @@ import datetime
 from email.mime import message
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
 from core.savemod_service import SaveModService
 from datetime import datetime
 from core.tracker_service import TrackerService
-
+from config import BOT_TOKEN
 from db.session import AsyncSessionLocal
 from db.models import UserSession
 from sqlalchemy import select
-from core import tasks
+from core import tasks, user_bot_service
+from core.user_bot_service import UserBotService
 
 router = Router()
 
+# MAIN_BOT_ID = int(BOT_TOKEN.split(":")[0])
+# router.message.filter(F.bot.id == MAIN_BOT_ID)
+
 ADMIN_IDS = [8418446543, 8566322265, 5484215621]
+
+class CreateBotStates(StatesGroup):
+    waiting_token = State()
+    waiting_title = State()
+
+
+@router.callback_query(F.data == "create_bot")
+async def start_create_bot(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    text = (
+        "⚙️ <b>Создание своего бота</b>\n\n"
+        "Чтобы создать своего бота, нужно сделать 2 простых шага:\n\n"
+        "1️⃣ Напиши @BotFather\n"
+        "2️⃣ Отправь мне токен, который он даст\n\n"
+        "<b>Готов?</b>"
+    )
+
+    await call.message.answer(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Да, готов!", callback_data="ready_for_token")],
+            [InlineKeyboardButton(text="Нет, позже", callback_data="back_to_start")]
+        ]),
+        parse_mode="HTML"
+    )
+
+@router.callback_query(F.data == "ready_for_token")
+async def ask_for_token(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    await state.set_state(CreateBotStates.waiting_token)
+    await call.message.edit_text(
+        "🔑 <b>Отправь токен своего бота</b>\n\n"
+        "Токен выглядит примерно так:\n"
+        "<code>7123456789:AAFxxxxxxxxxxxxxxxxxxxxxxxxxxxx</code>\n\n"
+        "Просто вставь его сюда:",
+        parse_mode="HTML"
+    )
+
+
+@router.message(CreateBotStates.waiting_token, F.bot.token == BOT_TOKEN)
+async def process_token(message: Message, state: FSMContext, user_bot_service: UserBotService):
+    token = message.text.strip()
+    wait_msg = await message.answer("⏳ Проверяю токен...")
+    user_bot = await user_bot_service.add_bot(
+        owner_id=message.from_user.id,
+        token=token
+    )
+
+    if user_bot:
+        await wait_msg.edit_text(
+            f"✅ <b>Бот успешно создан и запущен!</b>\n\n"
+            f"@{user_bot.username}\n"
+            f"Название: {user_bot.title}\n\n"
+            f"Теперь ты можешь использовать своего бота.\n"
+            f"Он работает параллельно с основным.",
+            parse_mode="HTML"
+        )
+        await state.clear()
+
+    else:
+        await wait_msg.edit_text(
+            "❌ Не удалось создать бота. Проверь токен и попробуй снова.",
+             parse_mode="HTML"
+        )
 
 def setup_tracker_handlers(tracker_service, savemod_service):
     pass

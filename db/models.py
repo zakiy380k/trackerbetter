@@ -9,6 +9,7 @@ from sqlalchemy import (
     Text,
     ForeignKey,
     DateTime,
+    func,          
 )
 from db.base import Base
 
@@ -70,3 +71,28 @@ class UserMessageLog(Base):
     created_at = Column(
         DateTime, default=lambda: datetime.datetime.now(timezone.utc)
     )
+
+
+
+
+class UserBot(Base):
+    __tablename__ = "user_bots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    owner_id = Column(BigInteger, nullable=False, index=True)           # telegram user id
+    token = Column(String, unique=True, nullable=False)
+    
+    username = Column(String, nullable=True, index=True)                # @username
+    title = Column(String, nullable=True)
+
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    # Дополнительные полезные поля
+    is_polling = Column(Boolean, default=True)          # polling или webhook
+    last_started_at = Column(DateTime, nullable=True)
+    last_error = Column(Text, nullable=True)
+
+    def __repr__(self):
+        return f"<UserBot {self.username} (owner={self.owner_id})>"
