@@ -49,12 +49,12 @@ bot = Bot(BOT_TOKEN)
 dp = Dispatcher(storage=storage)
 
 # ====================== СЕРВИСЫ ======================
-user_bot_service = UserBotService()
 session_manager = SessionManager()
 tracker_service = TrackerService(bot, session_manager)
 auth_service = AuthService()
 savemod_service = SaveModService(bot, session_manager)
 business_service = init_business_savemod(bot)
+user_bot_service = UserBotService(savemod_service=savemod_service, session_manager=session_manager, dispatcher=dp)  # Инициализируем позже
 
 # Контекст
 dp["user_bot_service"] = user_bot_service
