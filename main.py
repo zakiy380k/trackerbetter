@@ -20,7 +20,7 @@ from core.business_savemod_service import init_business_savemod, router as busin
 from db.models import UserSession
 from db.session import AsyncSessionLocal
 from sqlalchemy import select
-from bot.handlers.user_bot_handlers import setup_user_bot_handlers  # если есть
+from db.init_db import init_db   # ← Добавили импорт
 
 # ====================== REDIS STORAGE ======================
 redis_url = os.getenv("REDIS_URL")
@@ -34,18 +34,17 @@ if redis_url:
             socket_connect_timeout=30
         )
         storage = RedisStorage(redis=redis)
-        print("✅ RedisStorage успешно подключён (Persistent)")
+        print("✅ RedisStorage успешно подключён")
     except Exception as e:
-        print(f"⚠️ Ошибка подключения Redis: {e}")
+        print(f"⚠️ Ошибка Redis: {e}")
         from aiogram.fsm.storage.memory import MemoryStorage
         storage = MemoryStorage()
-        print("→ Используется MemoryStorage")
 else:
     from aiogram.fsm.storage.memory import MemoryStorage
     storage = MemoryStorage()
-    print("⚠️ REDIS_URL не найден → MemoryStorage")
+    print("⚠️ Используется MemoryStorage")
 
-# ====================== BOT & DISPATCHER ======================
+# ====================== BOT ======================
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher(storage=storage)
 
@@ -57,7 +56,7 @@ auth_service = AuthService()
 savemod_service = SaveModService(bot, session_manager)
 business_service = init_business_savemod(bot)
 
-# Прокидываем сервисы в контекст
+# Контекст
 dp["user_bot_service"] = user_bot_service
 dp["tracker_service"] = tracker_service
 dp["savemod_service"] = savemod_service
@@ -69,12 +68,6 @@ dp["business_savemod_service"] = business_service
 tracker.setup_tracker_handlers(tracker_service, savemod_service)
 auth.setup_auth_handlers(auth_service)
 start.setup_start_handlers(session_manager, tracker_service, savemod_service, user_bot_service)
-
-# Если у тебя есть setup для user_bot_handlers
-try:
-    setup_user_bot_handlers(savemod_service, session_manager)
-except:
-    pass
 
 # ====================== РОУТЕРЫ ======================
 dp.include_router(business_router)
@@ -90,28 +83,22 @@ app = FastAPI(title="TrackerZaki Bot")
 async def on_startup():
     await init_db()
 
-    # Запуск всех пользовательских ботов
     await user_bot_service.load_all_bots()
 
-    # === Webhook (критично для Render) ===
+    # Webhook
     await bot.delete_webhook(drop_pending_updates=True)
-    await asyncio.sleep(1)
+    await asyncio.sleep(1.5)
 
     await bot.set_webhook(
         url=WEBHOOK_URL + WEBHOOK_PATH,
         allowed_updates=[
-            "message", "callback_query",
-            "business_connection", "business_message",
-            "edited_business_message", "deleted_business_messages"
+            "message", "callback_query", "business_connection",
+            "business_message", "edited_business_message", "deleted_business_messages"
         ],
-        drop_pending_updates=True,
-        max_connections=100
+        drop_pending_updates=True
     )
 
-    # Загрузка Business Connections
     await business_service.load_registry()
-
-    # Восстановление Telethon сессий
     await session_manager.restore_all_sessions()
 
     # Восстановление SaveMod
@@ -121,16 +108,12 @@ async def on_startup():
                 select(UserSession.savemod_enabled)
                 .where(UserSession.bot_user_id == user_id)
             )
-            is_enabled = res.scalar()
-            
-            if is_enabled and hasattr(savemod_service, '_attach_handlers'):
+            if res.scalar():
                 savemod_service._attach_handlers(client, user_id)
                 savemod_service._attached_clients.add(user_id)
 
     me = await bot.get_me()
-    print(f"✅ Основной бот @{me.username} успешно запущен на Render!")
-    print(f"🌐 Webhook: {WEBHOOK_URL + WEBHOOK_PATH}")
-    print(f"📊 Активных UserBots: {len(user_bot_service.running_bots)}")
+    print(f"✅ @{me.username} запущен на Render (Redis: {'ON' if redis_url else 'OFF'})")
 
 
 @app.post(WEBHOOK_PATH)
@@ -141,29 +124,16 @@ async def telegram_webhook(request: Request):
 
 
 @app.get("/health")
-@app.head("/health")
 async def health():
-    return {
-        "status": "ok",
-        "active_user_bots": len(user_bot_service.running_bots)
-    }
+    return {"status": "ok", "user_bots": len(user_bot_service.running_bots)}
 
 
 @app.get("/restart_webhook")
 async def restart_webhook():
-    """Полезно для UptimeRobot"""
-    try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        await asyncio.sleep(1)
-        await bot.set_webhook(
-            url=WEBHOOK_URL + WEBHOOK_PATH,
-            allowed_updates=["message", "callback_query", "business_connection", 
-                           "business_message", "edited_business_message", "deleted_business_messages"],
-            drop_pending_updates=True
-        )
-        return {"status": "ok", "message": "Webhook restarted"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    await bot.delete_webhook(drop_pending_updates=True)
+    await asyncio.sleep(1)
+    await bot.set_webhook(url=WEBHOOK_URL + WEBHOOK_PATH, allowed_updates=[...])
+    return {"status": "webhook restarted"}
 
 
 @app.on_event("shutdown")
@@ -171,9 +141,8 @@ async def on_shutdown():
     for bot_id in list(user_bot_service.running_bots.keys()):
         await user_bot_service.stop_bot(bot_id)
     await bot.session.close()
-    print("🛑 Бот остановлен")
 
 
 @app.get("/")
 async def root():
-    return {"status": "alive", "service": "TrackerZaki Constructor"}
+    return {"status": "alive"}
