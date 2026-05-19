@@ -6,3 +6,5 @@ aiosqlite
 pytz
 telethon
 dotenv
+redis>=5.0.0
+aiogram[redis]
