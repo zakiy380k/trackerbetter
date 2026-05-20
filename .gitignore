@@ -8,3 +8,10 @@ sessions/
 *.session
 
 # IDE
+# Env (ВАЖНО! - токены и пароли)
+.env
+*.env
+
+# Database (локальная)
+database.db
+*.db
