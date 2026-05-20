@@ -333,3 +333,9 @@ async def commands_handler(message: Message):
         "🔹 <code>/id</code> - Получить ID пользователя (ответ на сообщение или пересланное)\n"
     )
     await message.answer(text, parse_mode="HTML")
+
+
+@router.message(Command("cancel"))
+async def cancel_handler(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("✅ Состояние сброшено. Теперь команды работают.")
