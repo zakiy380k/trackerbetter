@@ -1,7 +1,7 @@
 import datetime
 from email.mime import message
 from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
@@ -335,7 +335,7 @@ async def commands_handler(message: Message):
     await message.answer(text, parse_mode="HTML")
 
 
-@router.message(Command("cancel"), state = "*")
+@router.message(Command("cancel"), StateFilter("*"))
 async def cancel_handler(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("✅ Состояние сброшено. Теперь команды работают.")
