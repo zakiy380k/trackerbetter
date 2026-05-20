@@ -175,14 +175,26 @@ async def process_code_input(message, state: FSMContext, code: str, user_id: int
                 await message.answer(text)
 
     except Exception as e:
+
         logging.error(f"Sign in error: {e}", exc_info=True)
+        
+        # Если это критическая ошибка сессии, сбрасываем всё
+        if "Auth session expired" in str(e):
+            await state.clear()
+            text = "❌ Сессия истекла (слишком много времени прошло). Начните авторизацию заново: /start"
+            if is_callback: await message.edit_text(text)
+            else: await message.answer(text)
+            return
+
+        # Иначе (если просто ошиблись цифрой) оставляем в состоянии ввода
         error_text = "❌ Неверный код. Попробуйте ещё раз."
         if is_callback:
             await message.edit_text(error_text, reply_markup=build_code_keyboard())
         else:
             await message.answer(error_text, reply_markup=build_code_keyboard())
+        
+        # Очищаем только введенный код, но оставляем состояние
         await state.update_data(code="")
-
 
 @router.message(AuthState.password)
 async def handle_password(message: Message, state: FSMContext):
