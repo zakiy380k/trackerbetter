@@ -237,6 +237,13 @@ class BusinessSaveModService:
             await bot.send_message(owner_id, info_text, parse_mode="HTML")
             return
 
+        try:
+            await bot.send_video_note(owner_id, video_note=saved.file_id)
+            await bot.send_message(owner_id, info_text, parse_mode="HTML")
+            return
+        except Exception as e:
+            pass
+
         send_order = [
             ("send_photo",    {"photo":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
             ("send_video",    {"video":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
@@ -258,12 +265,7 @@ class BusinessSaveModService:
                 break
 
         # Кружок
-        try:
-            await bot.send_video_note(owner_id, video_note=saved.file_id)
-            await bot.send_message(owner_id, info_text, parse_mode="HTML")
-        except Exception as e:
-            print(f"[BusinessSaveMod] Fallback video_note тоже упал: {e}")
-            await bot.send_message(owner_id, info_text, parse_mode="HTML")
+        await bot.send_message(owner_id, info_text, parse_mode="HTML")
 
     # ─────────────────── ОСНОВНАЯ ЛОГИКА ─────────────────── #
 
