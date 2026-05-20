@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
 
@@ -7,15 +7,12 @@ from bot.states.auth import AuthState
 from bot.keyboards.code_keyboard import build_code_keyboard
 from core.auth_service import AuthService
 import re
-from config import BOT_TOKEN
+import logging
 
 router = Router()
 
 _auth_service: AuthService | None = None
 
-# MAIN_BOT_ID = int(BOT_TOKEN.split(":")[0])
-
-# router.message.filter(F.bot.id == MAIN_BOT_ID)
 
 def setup_auth_handlers(shared_auth_service: AuthService):
     global _auth_service
@@ -28,18 +25,15 @@ async def start_login(call: CallbackQuery, state: FSMContext):
     kb = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📱 Отправить номер телефона", request_contact=True)]],
         resize_keyboard=True,
-        one_time_keyboard=True,
-        is_persistent=True
+        one_time_keyboard=True
     )
 
     await call.answer()
-
     await call.message.answer(
         "🔐 Авторизация\n\n"
         "Нажмите кнопку ниже, чтобы отправить свой номер телефона 👇",
         reply_markup=kb
     )
-
     await state.set_state(AuthState.phone)
 
 
@@ -84,15 +78,14 @@ async def _send_code(message: Message, state: FSMContext, phone: str):
 
         await message.answer(
             f"✅ Номер <b>{phone}</b> принят!\n\n"
-            f"📩 Код подтверждения был отправлен в Telegram.\n"
-            f"Введите его ниже или используйте клавиатуру:",
+            f"📩 Код отправлен в Telegram.\nВведите его ниже:",
             reply_markup=build_code_keyboard(),
             parse_mode="HTML"
         )
         await state.set_state(AuthState.code)
 
     except Exception as e:
-        print(f"Ошибка send_code: {e}")
+        logging.error(f"Send code error: {e}")
         await message.answer("❌ Не удалось отправить код. Попробуйте позже.")
 
 
@@ -100,7 +93,7 @@ async def _send_code(message: Message, state: FSMContext, phone: str):
 @router.message(AuthState.code)
 async def handle_code_text(message: Message, state: FSMContext):
     code = message.text.strip()
-    await process_code_input(message, state, code)
+    await process_code_input(message, state, code, message.from_user.id)
 
 
 @router.callback_query(AuthState.code, F.data.startswith("digit:"))
@@ -115,7 +108,6 @@ async def handle_digit(call: CallbackQuery, state: FSMContext):
 
     code += digit
     await state.update_data(code=code)
-
     await _update_code_message(call, code)
     await call.answer()
 
@@ -124,7 +116,6 @@ async def handle_digit(call: CallbackQuery, state: FSMContext):
 async def handle_backspace(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     code = data.get("code", "")[:-1]
-
     await state.update_data(code=code)
     await _update_code_message(call, code)
     await call.answer()
@@ -135,11 +126,11 @@ async def handle_confirm(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     code = data.get("code", "")
 
-    if len(code) < 4:   # обычно 5-6 символов
+    if len(code) < 4:
         await call.answer("Код слишком короткий", show_alert=True)
         return
 
-    await process_code_input(call.message, state, code, is_callback=True)
+    await process_code_input(call.message, state, code, call.from_user.id, is_callback=True)
 
 
 async def _update_code_message(call: CallbackQuery, code: str):
@@ -150,11 +141,11 @@ async def _update_code_message(call: CallbackQuery, code: str):
             parse_mode="HTML"
         )
     except TelegramBadRequest:
-        pass  # сообщение не изменилось
+        pass
 
 
 # ====================== ОБРАБОТКА КОДА ======================
-async def process_code_input(message_or_call_message, state: FSMContext, code: str,user_id ,is_callback: bool = False):
+async def process_code_input(message, state: FSMContext, code: str, user_id: int, is_callback: bool = False):
     data = await state.get_data()
     phone = data["phone"]
     phone_code_hash = data["phone_code_hash"]
@@ -169,28 +160,28 @@ async def process_code_input(message_or_call_message, state: FSMContext, code: s
 
         if result == "OK":
             await state.clear()
-            text = "✅ Авторизация прошла успешно!\n\nИспользуйте команды:\n/tracker или /savemod_on"
+            text = "✅ Авторизация прошла успешно!\n\nИспользуйте /tracker или /savemod_on"
             if is_callback:
-                await message_or_call_message.edit_text(text)
+                await message.edit_text(text)
             else:
-                await message_or_call_message.answer(text)
+                await message.answer(text)
 
         elif result == "PASSWORD_REQUIRED":
             await state.set_state(AuthState.password)
-            text = "🔐 Включена двухфакторная аутентификация.\n\nВведите пароль от аккаунта:"
+            text = "🔐 Включена двухфакторная защита.\n\nВведите пароль от аккаунта:"
             if is_callback:
-                await message_or_call_message.edit_text(text)
+                await message.edit_text(text)
             else:
-                await message_or_call_message.answer(text)
+                await message.answer(text)
 
     except Exception as e:
-        print(f"Sign in error: {e}")
+        logging.error(f"Sign in error: {e}", exc_info=True)
         error_text = "❌ Неверный код. Попробуйте ещё раз."
         if is_callback:
-            await message_or_call_message.edit_text(error_text, reply_markup=build_code_keyboard())
+            await message.edit_text(error_text, reply_markup=build_code_keyboard())
         else:
-            await message_or_call_message.answer(error_text, reply_markup=build_code_keyboard())
-        await state.update_data(code="")  # сбрасываем код
+            await message.answer(error_text, reply_markup=build_code_keyboard())
+        await state.update_data(code="")
 
 
 @router.message(AuthState.password)
@@ -202,5 +193,5 @@ async def handle_password(message: Message, state: FSMContext):
         await state.clear()
         await message.answer("✅ Авторизация успешно завершена!")
     except Exception as e:
-        print(e)
+        logging.error(f"Password error: {e}", exc_info=True)
         await message.answer("❌ Неверный пароль. Попробуйте ещё раз.")
