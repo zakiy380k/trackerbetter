@@ -335,7 +335,7 @@ async def commands_handler(message: Message):
     await message.answer(text, parse_mode="HTML")
 
 
-@router.message(Command("cancel"))
+@router.message(Command("cancel"), state = "*")
 async def cancel_handler(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("✅ Состояние сброшено. Теперь команды работают.")
