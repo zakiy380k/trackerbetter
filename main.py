@@ -123,7 +123,9 @@ async def telegram_webhook(request: Request):
     return {"ok": True}
 
 
+
 @app.get("/health")
+@app.head("/health")
 async def health():
     return {"status": "ok", "user_bots": len(user_bot_service.running_bots)}
 
