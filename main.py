@@ -115,7 +115,11 @@ async def on_startup():
     me = await bot.get_me()
     print(f"✅ @{me.username} запущен на Render (Redis: {'ON' if redis_url else 'OFF'})")
 
-
+# Добавьте это в начало вашего main.py или роутера с авторизацией
+@dp.message(Command("reset")) # Или любая другая команда
+async def force_reset(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("✅ Всё сброшено. Попробуйте /start заново.")
 @app.post(WEBHOOK_PATH)
 async def telegram_webhook(request: Request):
     update_data = await request.json()
