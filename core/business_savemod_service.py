@@ -361,7 +361,7 @@ class BusinessSaveModService:
             f"👤 От: <a href=\"tg://user?id={saved.sender_id}\">{sender_name}</a>\n\n"
             f"Старый:\n<blockquote>{old_text or '<i>пусто</i>'}</blockquote>\n\n"
             f"Новый:\n<blockquote>{new_text}</blockquote>\n\n"
-            f"<b>@{message.bot.username or 'Bot'}</b>",
+            f"<b>@TrackerZaki_Bot</b>",
             parse_mode="HTML",
         )
 
