@@ -390,13 +390,14 @@ class BusinessSaveModService:
 
             safe_text = escape(saved.text or '')
 
+
             info_text = (
                 f"🗑 <b>Удалённое сообщение</b>\n\n"
                 f"<blockquote>"
-                f"<b><a href=\"tg://user?id={saved.sender_id}\">{sender_name}</a></b>\n"
+                f"<b><a href='tg://user?id={saved.sender_id}'>{sender_name}</a></b>\n"
                 f"{safe_text}"
                 f"</blockquote>"
-                f'<b><a href="https://t.me/TrackerZaki_Bot">TrackerZaki_Bot</a></b>\n\n'
+                f"<b>@TrackerZaki_Bot</b>",
             )
 
             # 🔥 Передаем event.bot для отправки медиа/текста
