@@ -396,7 +396,7 @@ class BusinessSaveModService:
                 f"<b><a href=\"tg://user?id={saved.sender_id}\">{sender_name}</a></b>\n"
                 f"{safe_text}"
                 f"</blockquote>"
-                f'<b><a href="https://t.me/TrackerZaki_Bot">TrackerZaki_Bot</a></b>\n\n',
+                f'<b><a href="https://t.me/TrackerZaki_Bot">TrackerZaki_Bot</a></b>\n\n'
             )
 
             # 🔥 Передаем event.bot для отправки медиа/текста
