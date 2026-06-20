@@ -394,7 +394,8 @@ class BusinessSaveModService:
                 f"<b><a href=\"tg://user?id={saved.sender_id}\">{sender_name}</a></b>\n"
                 f"{saved.text or ''}"
                 f"</blockquote>"
-                f"<b>@TrackerZaki_Bot</b>"
+                f"<b>@TrackerZaki_Bot</b>",
+                parse_mode="HTML",
             )
 
             # 🔥 Передаем event.bot для отправки медиа/текста
