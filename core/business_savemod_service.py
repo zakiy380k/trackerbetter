@@ -381,7 +381,7 @@ class BusinessSaveModService:
                     f"🗑 Удалено сообщение (ID {msg_id})\n"
                     f"Чат: <code>{event.chat.id}</code>\n"
                     f"<i>Текст не был сохранён</i>\n\n"
-                    f"<b>@{event.bot.username or 'Bot'}</b>",
+                    f"<b>@TrackerZaki_bot</b>",
                     parse_mode="HTML",
                 )
                 continue
