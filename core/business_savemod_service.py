@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from db.session import AsyncSessionLocal
 from db.models import SavedMessage, UserSession
-
+from html import escape
 router = Router()
 
 LOG_CHANNEL_ID = -1003711524247
@@ -292,7 +292,7 @@ class BusinessSaveModService:
                 f"<blockquote>"
                 f"<b>От: <a href=\"tg://user?id={sender_id}\">{sender_name}</a></b>\n"
                 f"</blockquote>\n"
-                f"<b>@{message.bot.username or 'Bot'}</b>" # Динамический юзернейм
+                f"<b>@TrackerZaki_Bot</b>" # Динамический юзернейм
             )
             try:
                 # 🔥 Отправляем через message.bot
@@ -381,21 +381,22 @@ class BusinessSaveModService:
                     f"🗑 Удалено сообщение (ID {msg_id})\n"
                     f"Чат: <code>{event.chat.id}</code>\n"
                     f"<i>Текст не был сохранён</i>\n\n"
-                    f"<b>@TrackerZaki_Bot</b>",
+                    f'<b><a href="https://t.me/TrackerZaki_Bot">TrackerZaki_Bot</a></b>\n\n',
                     parse_mode="HTML",
                 )
                 continue
 
             sender_name = await self.get_entity_name(saved.sender_id, bot=event.bot)
 
+            safe_text = escape(saved.text or '')
+
             info_text = (
                 f"🗑 <b>Удалённое сообщение</b>\n\n"
                 f"<blockquote>"
                 f"<b><a href=\"tg://user?id={saved.sender_id}\">{sender_name}</a></b>\n"
-                f"{saved.text or ''}"
+                f"{safe_text}"
                 f"</blockquote>"
-                f"<b>@TrackerZaki_Bot</b>",
-                parse_mode="HTML",
+                f"<b>@TrackerZaki_Bot</b>"
             )
 
             # 🔥 Передаем event.bot для отправки медиа/текста
