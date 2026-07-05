@@ -67,7 +67,7 @@ class BusinessSaveModService:
                     SavedMessage.message_id == msg_id,
                 )
             )
-            return result.scalar_one_or_none()
+            return result.scalars().first()
 
     async def get_entity_name(self, entity_id: int, bot: Bot = None) -> str:
         """Получает имя чата через переданного активного бота (или главного бота)"""
