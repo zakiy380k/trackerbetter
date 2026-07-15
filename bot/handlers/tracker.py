@@ -168,7 +168,6 @@ async def export_logs_handler(message: Message, savemod_service: SaveModService)
     txt_content = await savemod_service.format_logs_to_txt(target_id)
     html_content = await savemod_service.format_logs_to_html(
         target_id,
-        bot=message.bot
     )
     
     if not txt_content:
