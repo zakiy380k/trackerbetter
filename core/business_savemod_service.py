@@ -2,6 +2,8 @@
 """
 SaveMod для Business Connection (Универсальный для Multibot режима).
 """
+from jinja2 import Environment, FileSystemLoader
+import os
 
 from datetime import datetime
 from io import BytesIO
@@ -144,7 +146,59 @@ class BusinessSaveModService:
             out += "=" * 60 + "\n\n"
 
         return out
-
+    async def format_logs_to_html(self, owner_id: int, bot: Bot = None) -> str | None:
+        logs = await self.get_user_logs(owner_id)
+        if not logs:
+            return None
+    
+        grouped = {}
+    
+        for log in logs:
+            grouped.setdefault(log.chat_id, []).append(log)
+    
+        chats = []
+    
+        for chat_id, chat_logs in grouped.items():
+            chat_name = await self.get_entity_name(chat_id, bot)
+    
+            messages = []
+    
+            for log in sorted(chat_logs, key=lambda x: x.date or 0):
+            
+                sender_name = await self.get_entity_name(log.sender_id, bot)
+    
+                messages.append({
+                    "sender": sender_name,
+                    "is_me": log.sender_id == owner_id,
+                    "text": escape(log.text or ""),
+                    "time": datetime.fromtimestamp(
+                        log.date
+                    ).strftime("%d.%m.%Y %H:%M") if log.date else "",
+                    "media": bool(log.file_id)
+                })
+    
+            chats.append({
+                "id": chat_id,
+                "name": chat_name,
+                "messages": messages
+            })
+    
+        env = Environment(
+            loader=FileSystemLoader(
+                os.path.join(os.getcwd(), "templates")
+            ),
+            autoescape=True
+        )
+    
+        template = env.get_template("logs.html")
+    
+        html = template.render(
+            generated=datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
+            owner=owner_id,
+            chats=chats
+        )
+    
+        return html
     def _detect_media_type(self, message: Message) -> str | None:
         if message.video_note:    return "video_note"
         if message.photo:         return "photo"

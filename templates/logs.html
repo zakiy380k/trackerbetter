@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Telegram Export</title>
+
+    <style>
+        *{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    background:#0e1621;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:#fff;
+    padding:30px;
+}
+
+.chat{
+    width:900px;
+    margin:40px auto;
+    background:#17212b;
+    border-radius:14px;
+    overflow:hidden;
+    box-shadow:0 8px 30px rgba(0,0,0,.45);
+}
+
+.header{
+    background:#1f2c38;
+    padding:18px 24px;
+    font-size:22px;
+    font-weight:600;
+    border-bottom:1px solid rgba(255,255,255,.05);
+}
+
+.messages{
+    padding:25px;
+    background:#0e1621;
+    background-image:
+        radial-gradient(rgba(255,255,255,.025) 1px, transparent 1px);
+    background-size:28px 28px;
+}
+
+.message{
+    max-width:72%;
+    margin-bottom:16px;
+    padding:10px 14px;
+    border-radius:14px;
+    position:relative;
+    animation:show .15s ease;
+}
+
+@keyframes show{
+    from{
+        opacity:0;
+        transform:translateY(8px);
+    }
+    to{
+        opacity:1;
+        transform:none;
+    }
+}
+
+.other{
+    background:#182533;
+    margin-right:auto;
+    border-bottom-left-radius:4px;
+}
+
+.me{
+    background:#2b5278;
+    margin-left:auto;
+    border-bottom-right-radius:4px;
+}
+
+.sender{
+    font-size:13px;
+    font-weight:600;
+    color:#62b0ff;
+    margin-bottom:6px;
+}
+
+.me .sender{
+    color:#9fd1ff;
+}
+
+.text{
+    white-space:pre-wrap;
+    word-break:break-word;
+    line-height:1.45;
+    font-size:15px;
+}
+
+.media{
+    margin-top:10px;
+    padding:8px 12px;
+    border-radius:10px;
+    background:rgba(255,255,255,.08);
+    display:inline-block;
+    font-size:14px;
+}
+
+.time{
+    margin-top:8px;
+    text-align:right;
+    font-size:12px;
+    opacity:.6;
+}
+
+.date-divider{
+    text-align:center;
+    margin:30px 0 18px;
+}
+
+.date-divider span{
+    display:inline-block;
+    background:#22303d;
+    color:#9fb3c8;
+    padding:6px 14px;
+    border-radius:20px;
+    font-size:13px;
+}
+
+.chat-info{
+    padding:20px;
+    background:#17212b;
+    border-bottom:1px solid rgba(255,255,255,.05);
+}
+
+.chat-info small{
+    color:#9fb3c8;
+    display:block;
+    margin-top:4px;
+}
+
+blockquote{
+    margin-top:8px;
+    padding-left:10px;
+    border-left:3px solid #4ea4f6;
+    color:#d7e7f8;
+}
+
+a{
+    color:#62b0ff;
+    text-decoration:none;
+}
+
+a:hover{
+    text-decoration:underline;
+}
+
+img{
+    max-width:320px;
+    border-radius:12px;
+    margin-top:10px;
+}
+
+video{
+    max-width:340px;
+    border-radius:12px;
+    margin-top:10px;
+}
+
+audio{
+    width:100%;
+    margin-top:10px;
+}
+
+pre{
+    margin-top:10px;
+    padding:10px;
+    border-radius:10px;
+    background:#101820;
+    overflow:auto;
+    font-size:13px;
+}
+
+.footer{
+    text-align:center;
+    color:#7b93aa;
+    padding:30px;
+    font-size:13px;
+}
+    </style>
+</head>
+<body>
+
+    {% for chat in chats %}
+    
+    <div class="chat">
+    
+        <div class="chat-info">
+            <h2>💬 {{ chat.name }}</h2>
+            <small>ID: {{ chat.id }}</small>
+        </div>
+    
+        <div class="messages">
+    
+            {% for msg in chat.messages %}
+    
+            <div class="message {% if msg.is_me %}me{% else %}other{% endif %}">
+    
+                <div class="sender">
+                    {% if msg.is_me %}
+                        🟢 Вы
+                    {% else %}
+                        🔵 {{ msg.sender }}
+                    {% endif %}
+                </div>
+    
+                <div class="text">
+                    {{ msg.text }}
+                </div>
+    
+                {% if msg.media %}
+                <div class="media">
+                    📎 Медиафайл
+                </div>
+                {% endif %}
+    
+                <div class="time">
+                    {{ msg.time }}
+                </div>
+    
+            </div>
+    
+            {% endfor %}
+    
+        </div>
+    
+    </div>
+    
+    {% endfor %}
+    
+    <div class="footer">
+        Архив переписки • {{ generated }}
+    </div>
+    
+    </body>
+</html>
