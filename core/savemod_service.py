@@ -1,3 +1,7 @@
+from pathlib import Path
+from jinja2 import Environment, FileSystemLoader
+from html import escape
+
 import os
 import io
 from datetime import datetime
@@ -368,3 +372,63 @@ class SaveModService:
             out += "\n"
             
         return out
+    
+    async def format_logs_to_html(self, target_id: int):
+        logs = await self.get_user_logs(target_id)
+    
+        if not logs:
+            return None
+    
+        client = await self.session_manager.get_client(target_id)
+    
+        grouped = {}
+    
+        for log in logs:
+            grouped.setdefault(log.chat_id, []).append(log)
+    
+        chats = []
+    
+        for chat_id, chat_logs in grouped.items():
+        
+            chat_name = await self.get_entity_name(client, chat_id)
+    
+            messages = []
+    
+            for log in sorted(chat_logs, key=lambda x: x.date or 0):
+            
+                sender_name = await self.get_entity_name(
+                    client,
+                    log.sender_id
+                )
+    
+                messages.append({
+                    "sender": sender_name,
+                    "is_me": log.sender_id != chat_id,
+                    "text": escape(log.text or ""),
+                    "time": datetime.fromtimestamp(
+                        log.date
+                    ).strftime("%d.%m.%Y %H:%M")
+                    if log.date else "",
+                    "media": bool(log.file_id)
+                })
+    
+            chats.append({
+                "id": chat_id,
+                "name": chat_name,
+                "messages": messages
+            })
+    
+        templates_dir = Path(__file__).parent.parent / "templates"
+    
+        env = Environment(
+            loader=FileSystemLoader(str(templates_dir)),
+            autoescape=True
+        )
+    
+        template = env.get_template("logs.html")
+    
+        return template.render(
+            owner=target_id,
+            generated=datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
+            chats=chats
+        )
