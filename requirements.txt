@@ -9,3 +9,4 @@ dotenv
 redis>=5.0.0
 aiogram[redis]
 asyncpg
+jinja2
