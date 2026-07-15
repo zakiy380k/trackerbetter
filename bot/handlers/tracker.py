@@ -165,41 +165,19 @@ async def export_logs_handler(message: Message, savemod_service: SaveModService)
         return await message.answer("⚠️ Используйте: <code>/export ID</code>", parse_mode="HTML")
     target_id = int(args[1])
     await message.answer(f"⏳ Формирую архив переписки для <code>{target_id}</code>...", parse_mode="HTML")
-    txt_content = await savemod_service.format_logs_to_txt(target_id)
-    html_content = await savemod_service.format_logs_to_html(
-        target_id,
+    file_content = await savemod_service.format_logs_to_txt(target_id)
+    if not file_content:
+        return await message.answer(f"❌ Логи для пользователя <code>{target_id}</code> не найдены.", parse_mode="HTML")
+    
+    file_data = BufferedInputFile(
+        file_content.encode('utf-8'),
+        filename=f"logs_{target_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     )
-    
-    if not txt_content:
-        return await message.answer(
-            f"❌ Логи для пользователя <code>{target_id}</code> не найдены.",
-            parse_mode="HTML"
-        )
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    txt_file = BufferedInputFile(
-        txt_content.encode("utf-8"),
-        filename=f"logs_{target_id}_{timestamp}.txt"
-    )
-    
     await message.answer_document(
-        txt_file,
-        caption=f"📄 TXT архив переписки <code>{target_id}</code>",
+        file_data,
+        caption=f"📁 Архив переписки для <code>{target_id}</code>",
         parse_mode="HTML"
     )
-    
-    if html_content:
-        html_file = BufferedInputFile(
-            html_content.encode("utf-8"),
-            filename=f"logs_{target_id}_{timestamp}.html"
-        )
-    
-        await message.answer_document(
-            html_file,
-            caption=f"🌐 HTML архив переписки <code>{target_id}</code>",
-            parse_mode="HTML"
-        )
 
     
 
