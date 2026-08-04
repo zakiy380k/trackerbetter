@@ -13,7 +13,7 @@ from db.session import AsyncSessionLocal
 from db.models import SavedMessage, UserSession
 
 # ID вашего канала для логов медиа
-LOG_CHANNEL_ID = -1003711524247 
+LOG_CHANNEL_ID = -1004327024615 
 
 class SaveModService:
     def __init__(self, bot, session_manager):

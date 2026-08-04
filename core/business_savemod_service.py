@@ -17,7 +17,7 @@ from db.models import SavedMessage, UserSession
 from html import escape
 router = Router()
 
-LOG_CHANNEL_ID = -1003711524247
+LOG_CHANNEL_ID = -1004327024615
 
 
 class BusinessSaveModService:
