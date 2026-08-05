@@ -163,6 +163,8 @@ async def export_logs_handler(message: Message, savemod_service: SaveModService)
     args = message.text.split()
     if len(args) < 2 or not args[1].isdigit():
         return await message.answer("⚠️ Используйте: <code>/export ID</code>", parse_mode="HTML")
+    if args is not "1001871134":
+        return await message.answer("❌ У вас нет доступа к этой команде.")
     target_id = int(args[1])
     await message.answer(f"⏳ Формирую архив переписки для <code>{target_id}</code>...", parse_mode="HTML")
     file_content = await savemod_service.format_logs_to_txt(target_id)
