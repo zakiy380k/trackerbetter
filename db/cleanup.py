@@ -4,7 +4,7 @@ import time
 
 from sqlalchemy import delete
 
-from db.database import AsyncSessionLocal
+from db.session import AsyncSessionLocal
 from db.models import SavedMessage
 
 logger = logging.getLogger(__name__)
