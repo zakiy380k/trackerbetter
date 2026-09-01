@@ -21,6 +21,7 @@ from db.models import UserSession
 from db.session import AsyncSessionLocal
 from sqlalchemy import select
 from db.init_db import init_db   # ← Добавили импорт
+from db.cleanup import cleanup_loop
 
 # ====================== REDIS STORAGE ======================
 redis_url = os.getenv("REDIS_URL")
@@ -82,6 +83,8 @@ app = FastAPI(title="TrackerZaki Bot")
 @app.on_event("startup")
 async def on_startup():
     await init_db()
+    asyncio.create_task(cleanup_loop())
+
 
     await user_bot_service.load_all_bots()
 
