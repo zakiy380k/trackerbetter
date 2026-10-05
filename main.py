@@ -16,7 +16,7 @@ from core.tracker_service import TrackerService
 from core.auth_service import AuthService
 from core.savemod_service import SaveModService
 from core.business_savemod_service import init_business_savemod, router as business_router
-
+from bot.handlers import start, terms, auth, tracker
 from db.models import UserSession
 from db.session import AsyncSessionLocal
 from sqlalchemy import select
@@ -77,7 +77,7 @@ dp.include_router(start.router)
 dp.include_router(terms.router)
 dp.include_router(auth.router)
 dp.include_router(tracker.router)
-
+dp.include_router(admin.router)
 # ====================== FASTAPI ======================
 app = FastAPI(title="TrackerZaki Bot")
 
@@ -96,7 +96,6 @@ async def on_startup():
             "message", "callback_query", "business_connection",
             "business_message", "edited_business_message", "deleted_business_messages"
         ],
- 
         secret_token=WEBHOOK_SECRET
     )
 
@@ -136,8 +135,6 @@ async def telegram_webhook(request: Request):
 @app.head("/health")
 async def health():
     return {"status": "ok", "user_bots": len(user_bot_service.running_bots)}
-
-
 
 
 
