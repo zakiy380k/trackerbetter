@@ -25,7 +25,7 @@ from db.cleanup import cleanup_loop
 
 # ====================== REDIS STORAGE ======================
 redis_url = os.getenv("REDIS_URL")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
+WEBHOOK_SECRET = os.environ["WEBHOOK_SECRET"]
 
 if redis_url:
     try:
@@ -90,16 +90,13 @@ async def on_startup():
     await user_bot_service.load_all_bots()
 
     # Webhook
-    await bot.delete_webhook(drop_pending_updates=True)
-    await asyncio.sleep(1.5)
-
     await bot.set_webhook(
         url=WEBHOOK_URL + WEBHOOK_PATH,
         allowed_updates=[
             "message", "callback_query", "business_connection",
             "business_message", "edited_business_message", "deleted_business_messages"
         ],
-        drop_pending_updates=True,
+ 
         secret_token=WEBHOOK_SECRET
     )
 
@@ -123,11 +120,12 @@ async def on_startup():
 
 @app.post(WEBHOOK_PATH)
 async def telegram_webhook(request: Request):
-    if WEBHOOK_SECRET:
-        secret_header = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-        if secret_header != WEBHOOK_SECRET:
-            from fastapi import HTTPException
-            raise HTTPException(status_code=403, detail="Access denied: invalid secret token")
+    secret_header = request.headers.get(
+        "X-Telegram-Bot-Api-Secret-Token"
+    )
+    if secret_header != WEBHOOK_SECRET:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Access denied: invalid secret token")
     update_data = await request.json()
     await dp.feed_raw_update(bot, update_data)
     return {"ok": True}
@@ -140,12 +138,7 @@ async def health():
     return {"status": "ok", "user_bots": len(user_bot_service.running_bots)}
 
 
-@app.get("/restart_webhook")
-async def restart_webhook():
-    await bot.delete_webhook(drop_pending_updates=True)
-    await asyncio.sleep(1)
-    await bot.set_webhook(url=WEBHOOK_URL + WEBHOOK_PATH, allowed_updates=[...])
-    return {"status": "webhook restarted"}
+
 
 
 @app.on_event("shutdown")
