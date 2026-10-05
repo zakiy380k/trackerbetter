@@ -16,7 +16,7 @@ from core.tracker_service import TrackerService
 from core.auth_service import AuthService
 from core.savemod_service import SaveModService
 from core.business_savemod_service import init_business_savemod, router as business_router
-from bot.handlers import start, terms, auth, tracker
+from bot.handlers import start, terms, auth, tracker, admin
 from db.models import UserSession
 from db.session import AsyncSessionLocal
 from sqlalchemy import select
