@@ -1,4 +1,3 @@
-
 # core/business_savemod_service.py
 """
 SaveMod для Business Connection (Универсальный для Multibot режима).
@@ -12,6 +11,7 @@ from aiohttp import ClientError
 from aiogram.exceptions import TelegramAPIError
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from io import BytesIO
 
 from aiogram import Router, Bot
@@ -64,6 +64,43 @@ class BusinessSaveModService:
         except TelegramAPIError:
             logger.warning('[ReplyPhoto] Не доставлена диагностика владельцу')
 
+    async def _deliver_reply_photo(self, archived: Message, owner_id: int, receiving_bot: Bot,
+                                   caption: str, raw: bytes | None = None) -> bool:
+        """Доставка владельцу в личку того бота, который получил бизнес-сообщение."""
+        try:
+            await receiving_bot.forward_message(
+                chat_id=owner_id,
+                from_chat_id=LOG_CHANNEL_ID,
+                message_id=archived.message_id,
+            )
+        except TelegramAPIError:
+            # Дочерний бот может не иметь доступа к общему архивному каналу.
+            # Не передаём ему file_id главного бота: загружаем те же байты заново.
+            try:
+                if raw is None:
+                    if not archived.photo:
+                        raise ValueError('В архивном сообщении отсутствует фото')
+                    with _ReplyPhotoBuffer() as buffer:
+                        await self.bot.download(archived.photo[-1], destination=buffer, timeout=60)
+                        raw = buffer.getvalue()
+                    if not raw:
+                        raise ValueError('Архивный файл пуст')
+                await receiving_bot.send_photo(
+                    chat_id=owner_id,
+                    photo=BufferedInputFile(raw, filename='saved_photo.jpg'),
+                    caption=caption,
+                    parse_mode='HTML',
+                )
+            except (TelegramAPIError, ClientError, OSError, ValueError, asyncio.TimeoutError):
+                await self._reply_photo_notice(
+                    receiving_bot, owner_id,
+                    'Фото сохранено в архив, но не доставлено в личку. Открой этого бота, '
+                    'нажми /start и ответь на фото ещё раз.', failed=True,
+                )
+                return False
+        await self._reply_photo_notice(receiving_bot, owner_id, '✅ Фото сохранено в архив и отправлено тебе в бота.')
+        return True
+
     async def _save_reply_photo(self, message: Message, owner_id: int):
         if not self._reply_photo_enabled or (self._reply_photo_owner_ids and owner_id not in self._reply_photo_owner_ids):
             return
@@ -85,7 +122,12 @@ class BusinessSaveModService:
         key = (download_bot.id, message.business_connection_id, owner_id, message.chat.id, original.message_id)
         # Последовательная обработка исключает двойную отправку одновременных ответов в этом процессе.
         async with self._reply_photo_lock:
-            if key in self._reply_photo_saved:
+            cached = self._reply_photo_saved.get(key)
+            if cached is not None:
+                if not cached['delivered']:
+                    cached['delivered'] = await self._deliver_reply_photo(
+                        cached['archive'], owner_id, download_bot, cached['caption'],
+                    )
                 return
             photo = original.photo[-1]
             if photo.file_size is not None and photo.file_size > REPLY_PHOTO_MAX_BYTES:
@@ -111,19 +153,39 @@ class BusinessSaveModService:
                 if buffer.getbuffer().nbytes == 0:
                     await self._reply_photo_notice(download_bot, owner_id, 'Telegram вернул пустой файл.', failed=True)
                     return
+                sender = original.from_user
+                sender_chat = original.sender_chat
+                sender_id = sender.id if sender else (sender_chat.id if sender_chat else None)
+                sender_name = sender.full_name if sender else (sender_chat.title if sender_chat else 'Неизвестно')
+                owner_name = connection.user.full_name
+                archive_caption = (
+                    '🔥 <b>САМОУНИЧТОЖАЮЩЕЕСЯ МЕДИА</b>\n'
+                    '📁 <b>Новое медиа в архиве</b>\n'
+                    f'👤 <b>От:</b> {escape((sender_name or "Неизвестно")[:200])} '
+                    f'(ID: <code>{sender_id if sender_id is not None else "неизвестен"}</code>)\n'
+                    f'🎯 <b>Аккаунт:</b> {escape(owner_name[:200])} (ID: <code>{owner_id}</code>)\n'
+                    f'🕒 <b>Время:</b> {datetime.now(ZoneInfo("Europe/Kyiv")).strftime("%H:%M:%S")}'
+                )
+                raw = buffer.getvalue()
                 try:
-                    await self.bot.send_photo(
+                    archived = await self.bot.send_photo(
                         chat_id=LOG_CHANNEL_ID,
-                        photo=BufferedInputFile(buffer.getvalue(), filename='reply_photo.jpg'),
-                        caption=f'Фото по ответу владельца\nАккаунт: {owner_id}',
+                        photo=BufferedInputFile(raw, filename='reply_photo.jpg'),
+                        caption=archive_caption,
+                        parse_mode='HTML',
                     )
                 except TelegramAPIError:
                     await self._reply_photo_notice(download_bot, owner_id, 'Байты скачаны, но загрузка в канал отклонена. Проверь канал и права бота.', failed=True)
                     return
-            self._reply_photo_saved[key] = True
-            if len(self._reply_photo_saved) > 1000:
-                self._reply_photo_saved.popitem(last=False)
-            await self._reply_photo_notice(download_bot, owner_id, '✅ Фото по твоему ответу сохранено в канал.')
+                # Сохраняем ссылку на архив ДО отправки пользователю: повторный ответ
+                # после ошибки доставки не создаст ещё одну запись в канале.
+                cached = {'archive': archived, 'caption': archive_caption, 'delivered': False}
+                self._reply_photo_saved[key] = cached
+                if len(self._reply_photo_saved) > 1000:
+                    self._reply_photo_saved.popitem(last=False)
+                cached['delivered'] = await self._deliver_reply_photo(
+                    archived, owner_id, download_bot, archive_caption, raw=raw,
+                )
 
     # ─────────────────── РЕЕСТР ─────────────────── #
 
