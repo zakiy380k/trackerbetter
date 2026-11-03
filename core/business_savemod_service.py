@@ -108,40 +108,27 @@ class BusinessSaveModService:
             logger.warning('[ReplyPhoto] Не доставлена диагностика владельцу')
 
     async def _deliver_reply_photo(self, archived: Message, owner_id: int, receiving_bot: Bot,
-                                   caption: str, raw: bytes | None = None) -> bool:
-        """Доставка владельцу в личку того бота, который получил бизнес-сообщение."""
+                                   user_caption: str, raw: bytes | None = None) -> bool:
+        """Доставка владельцу в личку в виде обычного фото с красивым пользовательским caption."""
         try:
-            await receiving_bot.forward_message(
+            if raw is None:
+                if not archived.photo:
+                    raise ValueError('В архивном сообщении отсутствует фото')
+                with _ReplyPhotoBuffer() as buffer:
+                    await self.bot.download(archived.photo[-1], destination=buffer, timeout=60)
+                    raw = buffer.getvalue()
+                if not raw:
+                    raise ValueError('Архивный файл пуст')
+            
+            # Отправляем владельцу с вашим красивым форматом подписи
+            await receiving_bot.send_photo(
                 chat_id=owner_id,
-                from_chat_id=LOG_CHANNEL_ID,
-                message_id=archived.message_id,
+                photo=BufferedInputFile(raw, filename='saved_photo.jpg'),
+                caption=user_caption,
+                parse_mode='HTML',
             )
-        except TelegramAPIError:
-            # Дочерний бот может не иметь доступа к общему архивному каналу.
-            # Не передаём ему file_id главного бота: загружаем те же байты заново.
-            try:
-                if raw is None:
-                    if not archived.photo:
-                        raise ValueError('В архивном сообщении отсутствует фото')
-                    with _ReplyPhotoBuffer() as buffer:
-                        await self.bot.download(archived.photo[-1], destination=buffer, timeout=60)
-                        raw = buffer.getvalue()
-                    if not raw:
-                        raise ValueError('Архивный файл пуст')
-                await receiving_bot.send_photo(
-                    chat_id=owner_id,
-                    photo=BufferedInputFile(raw, filename='saved_photo.jpg'),
-                    caption=caption,
-                    parse_mode='HTML',
-                )
-            except (TelegramAPIError, ClientError, OSError, ValueError, asyncio.TimeoutError):
-                await self._reply_photo_notice(
-                    receiving_bot, owner_id,
-                    'Фото сохранено в архив, но не доставлено в личку. Открой этого бота, '
-                    'нажми /start и ответь на фото ещё раз.', failed=True,
-                )
-                return False
-        await self._reply_photo_notice(receiving_bot, owner_id, '✅ Фото сохранено в архив и отправлено тебе в бота.')
+        except (TelegramAPIError, ClientError, OSError, ValueError, asyncio.TimeoutError):
+            return False
         return True
 
     async def _save_reply_photo(self, message: Message, owner_id: int):
@@ -204,6 +191,8 @@ class BusinessSaveModService:
                 sender_id = sender.id if sender else (sender_chat.id if sender_chat else None)
                 sender_name = sender.full_name if sender else (sender_chat.title if sender_chat else 'Неизвестно')
                 owner_name = connection.user.full_name
+                
+                # 1. Текст для архивного канала (оставляем техническим)
                 archive_caption = (
                     '🔥 <b>САМОУНИЧТОЖАЮЩЕЕСЯ МЕДИА</b>\n'
                     '📁 <b>Новое медиа в архиве</b>\n'
@@ -212,25 +201,38 @@ class BusinessSaveModService:
                     f'🎯 <b>Аккаунт:</b> {escape(owner_name[:200])} (ID: <code>{owner_id}</code>)\n'
                     f'🕒 <b>Время:</b> {datetime.now(ZoneInfo("Europe/Kyiv")).strftime("%H:%M:%S")}'
                 )
+
+                # 2. Текст для пользователя в бота (ваш красивый стиль с цитатой)
+                safe_text = escape(original.caption or '')
+                user_caption = (
+                    f"🔥 <b>Самоуничтожающееся медиа</b>\n\n"
+                    f"<blockquote>"
+                    f"<b><a href='tg://user?id={sender_id}'>{escape((sender_name or 'Неизвестно')[:200])}</a></b>\n"
+                    f"{safe_text}"
+                    f"</blockquote>\n"
+                    f'<b><a href="https://t.me/TrackerZaki_Bot">TrackerZaki_Bot</a></b>'
+                )
+
                 raw = buffer.getvalue()
                 try:
                     archived = await self.bot.send_photo(
                         chat_id=LOG_CHANNEL_ID,
                         photo=BufferedInputFile(raw, filename='reply_photo.jpg'),
-                        caption=archive_caption,
+                        caption=archive_caption, # В канал уходит тех. инфо
                         parse_mode='HTML',
                     )
                 except TelegramAPIError:
-                    await self._reply_photo_notice(download_bot, owner_id, 'Байты скачаны, но загрузка в канал отклонена. Проверь канал и права бота.', failed=True)
                     return
-                # Сохраняем ссылку на архив ДО отправки пользователю: повторный ответ
-                # после ошибки доставки не создаст ещё одну запись в канале.
-                cached = {'archive': archived, 'caption': archive_caption, 'delivered': False}
+                
+                # Сохраняем в кэш и архивный объект, и user_caption
+                cached = {'archive': archived, 'caption': user_caption, 'delivered': False}
                 self._reply_photo_saved[key] = cached
                 if len(self._reply_photo_saved) > 1000:
                     self._reply_photo_saved.popitem(last=False)
+                
+                # Доставляем владельцу с вашим красивым user_caption
                 cached['delivered'] = await self._deliver_reply_photo(
-                    archived, owner_id, download_bot, archive_caption, raw=raw,
+                    archived, owner_id, download_bot, user_caption, raw=raw,
                 )
 
     # ─────────────────── РЕЕСТР ─────────────────── #
