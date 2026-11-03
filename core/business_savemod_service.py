@@ -5,6 +5,8 @@ SaveMod для Business Connection (Универсальный для Multibot �
 from jinja2 import Environment, FileSystemLoader
 import os
 import asyncio
+import base64
+import binascii
 import logging
 from collections import OrderedDict
 from aiohttp import ClientError
@@ -27,6 +29,47 @@ LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "-1004327024615"))
 
 logger = logging.getLogger(__name__)
 REPLY_PHOTO_MAX_BYTES = 10 * 1024 * 1024
+
+
+def _telegram_file_type(file_id: str) -> int | None:
+    """Читает тип из TDLib remote file_id (форматы 2 и 4).
+
+    Источники: tdlib/td, files/FileManager.cpp, FileLocation.hpp, FileType.h.
+    Типы: Photo=2, SelfDestructingPhoto=22. Неизвестный формат — None.
+    file_id не является документированным публичным контрактом Bot API.
+    """
+    if not isinstance(file_id, str) or not 4 <= len(file_id) <= 4096:
+        return None
+    try:
+        packed = base64.b64decode(file_id + '=' * (-len(file_id) % 4), altchars=b'-_', validate=True)
+    except (ValueError, binascii.Error):
+        return None
+    if not packed:
+        return None
+    if packed[-1] == 4:
+        packed = packed[:-2]  # Версия сериализации и версия persistent ID.
+    elif packed[-1] == 2:
+        packed = packed[:-1]
+    else:
+        return None
+    decoded = bytearray()
+    index = 0
+    while index < len(packed):
+        value = packed[index]
+        index += 1
+        if value == 0:
+            if index >= len(packed) or packed[index] == 0:
+                return None
+            decoded.extend(b'\x00' * packed[index])
+            index += 1
+        else:
+            decoded.append(value)
+        if len(decoded) > 16384:
+            return None
+    if len(decoded) < 8:
+        return None
+    raw_type = int.from_bytes(decoded[:4], 'little')
+    return raw_type & ~((1 << 24) | (1 << 25))
 
 
 class _ReplyPhotoBuffer(BytesIO):
@@ -110,6 +153,9 @@ class BusinessSaveModService:
             return
         original = message.reply_to_message
         if not original or not original.photo:
+            return
+        # Обычные фотографии и спойлеры не запускают сохранение по ответу.
+        if not self._check_ttl(original):
             return
         download_bot = message.bot
         try:
@@ -372,8 +418,14 @@ class BusinessSaveModService:
         return None
 
     def _check_ttl(self, message: Message) -> bool:
-        if message.photo and getattr(message.photo[-1], 'ttl_seconds', None):
-            return True
+        if message.photo:
+            photo = message.photo[-1]
+            if _telegram_file_type(photo.file_id) == 22:
+                return True
+            # На случай, если Telegram явно передаст TTL в объекте медиа.
+            ttl = getattr(photo, 'ttl_seconds', None)
+            if isinstance(ttl, int) and ttl > 0:
+                return True
         if message.video and getattr(message.video, 'ttl_seconds', None):
             return True
         return False
@@ -382,6 +434,9 @@ class BusinessSaveModService:
         """Скачивает медиа через бота-получателя, льет в канал через Главного бота, возвращает оригинальный file_id."""
         media_type = self._detect_media_type(message)
         if not media_type:
+            return None
+        # Временное фото сохраняет только обработчик ответа владельца.
+        if message.photo and self._check_ttl(message):
             return None
 
         try:
@@ -499,36 +554,47 @@ class BusinessSaveModService:
         prefix = "🔥 <b>САМОУНИЧТОЖАЮЩЕЕСЯ МЕДИА</b>\n" if is_ttl else ""
 
         sender_id = message.from_user.id if message.from_user else 0
+        sender_name = await self.get_entity_name(sender_id, bot=message.bot)
 
-        if is_ttl:
-            sender_name = await self.get_entity_name(sender_id, bot=message.bot)
-            ttl_text = (
-                f"🔥 <b>Самоуничтожающееся сообщение</b>\n\n"
-                f"<blockquote>"
-                f"<b>От: <a href=\"tg://user?id={sender_id}\">{sender_name}</a></b>\n"
-                f"</blockquote>\n"
-                f"<b>@TrackerZaki_Bot</b>" # Динамический юзернейм
-            )
-            try:
-                # 🔥 Отправляем через message.bot
-                await message.bot.send_message(chat_id=owner_id, text=ttl_text, parse_mode="HTML")
-            except Exception as e:
-                print(f"[BusinessSaveMod] Ошибка отправки TTL алерта: {e}")
-
+        # 1. Сначала сохраняем медиа в лог-канал (если оно есть)
         file_id = None
         if media_type:
             file_id = await self._save_media_to_log(message, owner_id, prefix)
 
-        if is_ttl and file_id:
+        # 2. Формируем единый красивый стиль уведомления для владельца
+        if is_ttl:
+            safe_text = escape(text)
+            # Стиль подписи идентичен стилю удаленных сообщений
+            ttl_caption = (
+                f"🔥 <b>Самоуничтожающееся медиа</b>\n\n"
+                f"<blockquote>"
+                f"<b><a href='tg://user?id={sender_id}'>{sender_name}</a></b>\n"
+                f"{safe_text}"
+                f"</blockquote>\n"
+                f'<b><a href="https://t.me/TrackerZaki_Bot">TrackerZaki_Bot</a></b>'
+            )
             try:
-                # 🔥 Отправляем через message.bot
-                if media_type == "video_note": await message.bot.send_video_note(chat_id=owner_id, video_note=file_id)
-                elif media_type == "photo": await message.bot.send_photo(chat_id=owner_id, photo=file_id)
-                elif media_type == "voice": await message.bot.send_voice(chat_id=owner_id, voice=file_id)
-                elif media_type == "video": await message.bot.send_video(chat_id=owner_id, video=file_id)
-                else: await message.bot.send_document(chat_id=owner_id, document=file_id)
+                if file_id:
+                    # Отправляем медиа СРАЗУ с красивой подписью-цитатой (без лишних текстовых алертов-дубликатов)
+                    send_kwargs = {"chat_id": owner_id, "caption": ttl_caption, "parse_mode": "HTML"}
+                    if media_type == "photo":
+                        await message.bot.send_photo(photo=file_id, **send_kwargs)
+                    elif media_type == "video":
+                        await message.bot.send_video(video=file_id, **send_kwargs)
+                    elif media_type == "voice":
+                        await message.bot.send_voice(voice=file_id, **send_kwargs)
+                    elif media_type == "audio":
+                        await message.bot.send_audio(audio=file_id, **send_kwargs)
+                    elif media_type == "video_note":
+                        await message.bot.send_video_note(chat_id=owner_id, video_note=file_id)
+                        await message.bot.send_message(chat_id=owner_id, text=ttl_caption, parse_mode="HTML")
+                    else:
+                        await message.bot.send_document(document=file_id, **send_kwargs)
+                else:
+                    # Если медиа не было, а был просто текст с таймером
+                    await message.bot.send_message(chat_id=owner_id, text=ttl_caption, parse_mode="HTML")
             except Exception as e:
-                print(f"[BusinessSaveMod] Ошибка пересылки TTL медиа: {e}")
+                print(f"[BusinessSaveMod] Ошибка отправки TTL уведомления: {e}")
 
         async with AsyncSessionLocal() as session:
             saved = SavedMessage(
