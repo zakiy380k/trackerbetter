@@ -627,7 +627,7 @@ class BusinessSaveModService:
                     SavedMessage.message_id == message.message_id,
                 )
             )
-            saved = result.scalar_one_or_none()
+            saved = result.scalars().first()
             if not saved or saved.text == new_text:
                 return
 
