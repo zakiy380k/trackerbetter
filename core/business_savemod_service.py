@@ -23,6 +23,8 @@ from sqlalchemy import select
 from db.session import AsyncSessionLocal
 from db.models import SavedMessage, UserSession
 from html import escape
+from aiogram.types import LinkPreviewOptions
+
 router = Router()
 
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "-1004327024615"))
@@ -115,7 +117,7 @@ class BusinessSaveModService:
         if media_type == 'video_note':
             sent = await bot.send_video_note(chat_id, video_note=upload)
             try:
-                await bot.send_message(chat_id, caption, parse_mode='HTML', reply_to_message_id=sent.message_id)
+                await bot.send_message(chat_id, caption, parse_mode='HTML', reply_to_message_id=sent.message_id,link_preview_options=LinkPreviewOptions(is_disabled=True)
             except (TelegramAPIError, ClientError, OSError, asyncio.TimeoutError):
                 logger.warning('[ReplyMedia] Не удалось отправить подпись к кружку')
             return sent
