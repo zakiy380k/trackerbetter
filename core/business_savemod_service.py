@@ -28,7 +28,10 @@ router = Router()
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "-1004327024615"))
 
 logger = logging.getLogger(__name__)
-REPLY_PHOTO_MAX_BYTES = 10 * 1024 * 1024
+REPLY_MEDIA_MAX_BYTES = 10 * 1024 * 1024
+# Значения TDLib FileType для SelfDestructingVideoNote и SelfDestructingVoiceNote.
+REPLY_PLAY_ONCE_TYPES = {"video_note": 24, "voice": 25}
+REPLY_MEDIA_FILENAMES = {"photo": "photo.jpg", "video_note": "video_note.mp4", "voice": "voice.ogg"}
 
 
 def _telegram_file_type(file_id: str) -> int | None:
@@ -72,10 +75,10 @@ def _telegram_file_type(file_id: str) -> int | None:
     return raw_type & ~((1 << 24) | (1 << 25))
 
 
-class _ReplyPhotoBuffer(BytesIO):
+class _ReplyMediaBuffer(BytesIO):
     def write(self, data):
-        if self.tell() + len(data) > REPLY_PHOTO_MAX_BYTES:
-            raise ValueError('Превышен лимит фото 10 МиБ')
+        if self.tell() + len(data) > REPLY_MEDIA_MAX_BYTES:
+            raise ValueError('Превышен лимит медиа 10 МиБ')
         return super().write(data)
 
 
@@ -85,106 +88,119 @@ class BusinessSaveModService:
         self._registry: dict[str, int] = {}     # bc_id → owner_id
         self._names_cache: dict[int, str] = {}  # entity_id → name
 
-        self._reply_photo_enabled = os.getenv('BUSINESS_REPLY_PHOTO_ENABLED', 'false').lower() == 'true'
-        self._reply_photo_diagnostics = os.getenv('BUSINESS_REPLY_PHOTO_DIAGNOSTICS', 'false').lower() == 'true'
-        self._reply_photo_owner_ids = {
+        self._reply_media_enabled = os.getenv('BUSINESS_REPLY_PHOTO_ENABLED', 'false').lower() == 'true'
+        self._reply_media_diagnostics = os.getenv('BUSINESS_REPLY_PHOTO_DIAGNOSTICS', 'false').lower() == 'true'
+        self._reply_media_owner_ids = {
             int(value.strip()) for value in os.getenv('BUSINESS_REPLY_PHOTO_OWNER_IDS', '').split(',')
             if value.strip()
         }
-        self._reply_photo_lock = asyncio.Lock()
-        self._reply_photo_saved = OrderedDict()
+        self._reply_media_lock = asyncio.Lock()
+        self._reply_media_saved = OrderedDict()
 
-    # ─────────────────── ФОТО ИЗ ОТВЕТА ВЛАДЕЛЬЦА ─────────────────── #
+    # ─────────────────── МЕДИА ИЗ ОТВЕТА ВЛАДЕЛЬЦА ─────────────────── #
 
-    async def _reply_photo_notice(self, bot, owner_id, text, *, failed=False):
+    async def _reply_media_notice(self, bot, owner_id, text, *, failed=False):
         # Не печатаем ответы API целиком: они могут содержать адрес файла или токен.
         if failed:
-            logger.warning('[ReplyPhoto] %s', text)
-        if not self._reply_photo_diagnostics:
+            logger.warning('[ReplyMedia] %s', text)
+        if not self._reply_media_diagnostics:
             return
         try:
             await bot.send_message(owner_id, text)
         except TelegramAPIError:
-            logger.warning('[ReplyPhoto] Не доставлена диагностика владельцу')
+            logger.warning('[ReplyMedia] Не доставлена диагностика владельцу')
 
-    async def _deliver_reply_photo(self, archived: Message, owner_id: int, receiving_bot: Bot,
-                                   user_caption: str, raw: bytes | None = None) -> bool:
-        """Доставка владельцу в личку в виде обычного фото с красивым пользовательским caption."""
+    async def _send_reply_media(self, bot, chat_id, media_type, raw, caption) -> Message:
+        upload = BufferedInputFile(raw, filename=REPLY_MEDIA_FILENAMES[media_type])
+        if media_type == 'video_note':
+            sent = await bot.send_video_note(chat_id, video_note=upload)
+            try:
+                await bot.send_message(chat_id, caption, parse_mode='HTML', reply_to_message_id=sent.message_id)
+            except (TelegramAPIError, ClientError, OSError, asyncio.TimeoutError):
+                logger.warning('[ReplyMedia] Не удалось отправить подпись к кружку')
+            return sent
+        if media_type == 'voice':
+            return await bot.send_voice(chat_id, voice=upload, caption=caption, parse_mode='HTML')
+        return await bot.send_photo(chat_id, photo=upload, caption=caption, parse_mode='HTML')
+
+    async def _deliver_reply_media(self, archived: Message, owner_id: int, receiving_bot: Bot,
+                                   media_type: str, user_caption: str, raw: bytes | None = None) -> bool:
         try:
             if raw is None:
-                if not archived.photo:
-                    raise ValueError('В архивном сообщении отсутствует фото')
-                with _ReplyPhotoBuffer() as buffer:
-                    await self.bot.download(archived.photo[-1], destination=buffer, timeout=60)
+                media = archived.photo[-1] if media_type == 'photo' and archived.photo else getattr(archived, media_type)
+                if not media:
+                    raise ValueError('В архивном сообщении отсутствует медиа')
+                with _ReplyMediaBuffer() as buffer:
+                    await self.bot.download(media, destination=buffer, timeout=60)
                     raw = buffer.getvalue()
                 if not raw:
                     raise ValueError('Архивный файл пуст')
-            
-            # Отправляем владельцу с вашим красивым форматом подписи
-            await receiving_bot.send_photo(
-                chat_id=owner_id,
-                photo=BufferedInputFile(raw, filename='saved_photo.jpg'),
-                caption=user_caption,
-                parse_mode='HTML',
-            )
+            await self._send_reply_media(receiving_bot, owner_id, media_type, raw, user_caption)
         except (TelegramAPIError, ClientError, OSError, ValueError, asyncio.TimeoutError):
             return False
         return True
 
-    async def _save_reply_photo(self, message: Message, owner_id: int):
-        if not self._reply_photo_enabled or (self._reply_photo_owner_ids and owner_id not in self._reply_photo_owner_ids):
+    async def _save_reply_media(self, message: Message, owner_id: int):
+        if not self._reply_media_enabled or (self._reply_media_owner_ids and owner_id not in self._reply_media_owner_ids):
             return
         if not message.from_user or message.from_user.id != owner_id or message.sender_business_bot:
             return
         if not message.business_connection_id:
             return
         original = message.reply_to_message
-        if not original or not original.photo:
+        if not original:
             return
-        # Обычные фотографии и спойлеры не запускают сохранение по ответу.
-        if not self._check_ttl(original):
+        media_type = self._detect_media_type(original)
+        if media_type == 'photo':
+            if not self._check_ttl(original):
+                return
+            media = original.photo[-1]
+        elif media_type in REPLY_PLAY_ONCE_TYPES:
+            media = getattr(original, media_type)
+            if _telegram_file_type(media.file_id) != REPLY_PLAY_ONCE_TYPES[media_type]:
+                return
+        else:
             return
         download_bot = message.bot
         try:
             connection = await download_bot.get_business_connection(message.business_connection_id)
         except TelegramAPIError:
-            await self._reply_photo_notice(download_bot, owner_id, 'Не удалось проверить бизнес-подключение.', failed=True)
+            await self._reply_media_notice(download_bot, owner_id, 'Не удалось проверить бизнес-подключение.', failed=True)
             return
         if connection.user.id != owner_id or not connection.is_enabled:
             return
         key = (download_bot.id, message.business_connection_id, owner_id, message.chat.id, original.message_id)
         # Последовательная обработка исключает двойную отправку одновременных ответов в этом процессе.
-        async with self._reply_photo_lock:
-            cached = self._reply_photo_saved.get(key)
+        async with self._reply_media_lock:
+            cached = self._reply_media_saved.get(key)
             if cached is not None:
                 if not cached['delivered']:
-                    cached['delivered'] = await self._deliver_reply_photo(
-                        cached['archive'], owner_id, download_bot, cached['caption'],
+                    cached['delivered'] = await self._deliver_reply_media(
+                        cached['archive'], owner_id, download_bot, media_type, cached['caption'],
                     )
                 return
-            photo = original.photo[-1]
-            if photo.file_size is not None and photo.file_size > REPLY_PHOTO_MAX_BYTES:
-                await self._reply_photo_notice(download_bot, owner_id, 'Фото превышает лимит 10 МиБ.', failed=True)
+            if media.file_size is not None and media.file_size > REPLY_MEDIA_MAX_BYTES:
+                await self._reply_media_notice(download_bot, owner_id, 'Медиа превышает лимит 10 МиБ.', failed=True)
                 return
             try:
-                remote = await download_bot.get_file(photo.file_id)
+                remote = await download_bot.get_file(media.file_id)
             except TelegramAPIError:
-                await self._reply_photo_notice(download_bot, owner_id, 'getFile отклонён Telegram: фото не сохранено.', failed=True)
+                await self._reply_media_notice(download_bot, owner_id, 'getFile отклонён Telegram: медиа не сохранено.', failed=True)
                 return
             if not remote.file_path:
-                await self._reply_photo_notice(download_bot, owner_id, 'getFile не вернул file_path: фото не сохранено.', failed=True)
+                await self._reply_media_notice(download_bot, owner_id, 'getFile не вернул file_path: медиа не сохранено.', failed=True)
                 return
-            if remote.file_size is not None and remote.file_size > REPLY_PHOTO_MAX_BYTES:
-                await self._reply_photo_notice(download_bot, owner_id, 'Файл превышает лимит 10 МиБ.', failed=True)
+            if remote.file_size is not None and remote.file_size > REPLY_MEDIA_MAX_BYTES:
+                await self._reply_media_notice(download_bot, owner_id, 'Файл превышает лимит 10 МиБ.', failed=True)
                 return
-            with _ReplyPhotoBuffer() as buffer:
+            with _ReplyMediaBuffer() as buffer:
                 try:
                     await download_bot.download_file(remote.file_path, destination=buffer, timeout=60)
                 except (TelegramAPIError, ClientError, OSError, ValueError, asyncio.TimeoutError):
-                    await self._reply_photo_notice(download_bot, owner_id, 'Не удалось скачать фото после getFile.', failed=True)
+                    await self._reply_media_notice(download_bot, owner_id, 'Не удалось скачать медиа после getFile.', failed=True)
                     return
                 if buffer.getbuffer().nbytes == 0:
-                    await self._reply_photo_notice(download_bot, owner_id, 'Telegram вернул пустой файл.', failed=True)
+                    await self._reply_media_notice(download_bot, owner_id, 'Telegram вернул пустой файл.', failed=True)
                     return
                 sender = original.from_user
                 sender_chat = original.sender_chat
@@ -215,24 +231,21 @@ class BusinessSaveModService:
 
                 raw = buffer.getvalue()
                 try:
-                    archived = await self.bot.send_photo(
-                        chat_id=LOG_CHANNEL_ID,
-                        photo=BufferedInputFile(raw, filename='reply_photo.jpg'),
-                        caption=archive_caption, # В канал уходит тех. инфо
-                        parse_mode='HTML',
+                    archived = await self._send_reply_media(
+                        self.bot, LOG_CHANNEL_ID, media_type, raw, archive_caption,
                     )
-                except TelegramAPIError:
+                except (TelegramAPIError, ClientError, OSError, asyncio.TimeoutError):
                     return
                 
                 # Сохраняем в кэш и архивный объект, и user_caption
                 cached = {'archive': archived, 'caption': user_caption, 'delivered': False}
-                self._reply_photo_saved[key] = cached
-                if len(self._reply_photo_saved) > 1000:
-                    self._reply_photo_saved.popitem(last=False)
+                self._reply_media_saved[key] = cached
+                if len(self._reply_media_saved) > 1000:
+                    self._reply_media_saved.popitem(last=False)
                 
                 # Доставляем владельцу с вашим красивым user_caption
-                cached['delivered'] = await self._deliver_reply_photo(
-                    archived, owner_id, download_bot, user_caption, raw=raw,
+                cached['delivered'] = await self._deliver_reply_media(
+                    archived, owner_id, download_bot, media_type, user_caption, raw=raw,
                 )
 
     # ─────────────────── РЕЕСТР ─────────────────── #
@@ -545,7 +558,7 @@ class BusinessSaveModService:
         if not owner_id or not await self._is_savemod_active(owner_id):
             return
 
-        await self._save_reply_photo(message, owner_id)
+        await self._save_reply_media(message, owner_id)
 
         if await self._get_saved(owner_id, message.chat.id, message.message_id):
             return  
@@ -719,4 +732,3 @@ async def on_edited_business_message(message: Message):
 @router.deleted_business_messages()
 async def on_deleted_business_messages(event: BusinessMessagesDeleted):
     await get_service().handle_deleted_messages(event)
-
