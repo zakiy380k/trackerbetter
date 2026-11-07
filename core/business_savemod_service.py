@@ -117,7 +117,7 @@ class BusinessSaveModService:
         if media_type == 'video_note':
             sent = await bot.send_video_note(chat_id, video_note=upload)
             try:
-                await bot.send_message(chat_id, caption, parse_mode='HTML', reply_to_message_id=sent.message_id,link_preview_options=LinkPreviewOptions(is_disabled=True)
+                await bot.send_message(chat_id, caption, parse_mode='HTML', reply_to_message_id=sent.message_id,link_preview_options=LinkPreviewOptions(is_disabled=True) )
             except (TelegramAPIError, ClientError, OSError, asyncio.TimeoutError):
                 logger.warning('[ReplyMedia] Не удалось отправить подпись к кружку')
             return sent
