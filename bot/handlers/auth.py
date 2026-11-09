@@ -90,7 +90,7 @@ async def _send_code(message: Message, state: FSMContext, phone: str):
 
 
 # ====================== ВВОД КОДА ======================
-@router.message(AuthState.code)
+@router.message(AuthState.code, F.text, ~F.text.startswith("/"))
 async def handle_code_text(message: Message, state: FSMContext):
     code = message.text.strip()
     await process_code_input(message, state, code, message.from_user.id)
