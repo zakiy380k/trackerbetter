@@ -1,34 +1,37 @@
+
 import logging
+
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError
-
 from sqlalchemy import select
 
 from config import API_ID, API_HASH
 from db.session import AsyncSessionLocal
 from db.models import UserSession
 
-# Правильный logger
+
 logger = logging.getLogger(__name__)
 
 
 class AuthService:
-
     def __init__(self):
-        # временные клиенты во время авторизации
         self.temp_clients: dict[int, TelegramClient] = {}
 
-    # =========================
-    # Отправка кода
-    # =========================
     async def send_code(self, user_id: int, phone: str):
-        # Удаляем старый клиент если есть
-        if user_id in self.temp_clients:
+        # Закрываем предыдущую временную сессию, если она есть
+        old_client = self.temp_clients.get(user_id)
+
+        if old_client:
             try:
-                await self.temp_clients[user_id].disconnect()
-            except:
-                pass
+                await old_client.disconnect()
+            except Exception:
+                logger.exception(
+                    "[Auth] Не удалось отключить старый клиент user_id=%s",
+                    user_id
+                )
+
+            self.temp_clients.pop(user_id, None)
 
         client = TelegramClient(
             StringSession(),
@@ -40,18 +43,43 @@ class AuthService:
 
         try:
             result = await client.send_code_request(phone=phone)
-            logger.info(f"[Auth] Код отправлен на {phone} для user_id={user_id}")
+
+            # Диагностика: какой способ доставки выбрал Telegram
+            print(
+                f"[AUTH DEBUG] Code request successful | "
+                f"user_id={user_id} | "
+                f"delivery_type={type(result.type).__name__}",
+                flush=True
+            )
+
             phone_code_hash = result.phone_code_hash
+
+            # Сохраняем клиент, чтобы использовать его при вводе кода
+            self.temp_clients[user_id] = client
+
+            logger.info(
+                "[Auth] Запрос кода выполнен успешно для user_id=%s",
+                user_id
+            )
+
+            return phone_code_hash
+
         except Exception as e:
-            logger.error(f"[Auth] Ошибка отправки кода на {phone}: {e}")
+            print(
+                f"[AUTH DEBUG] Code request failed | "
+                f"user_id={user_id} | "
+                f"error={type(e).__name__}: {e}",
+                flush=True
+            )
+
+            logger.exception(
+                "[Auth] Ошибка запроса кода для user_id=%s",
+                user_id
+            )
+
+            await client.disconnect()
             raise
 
-        self.temp_clients[user_id] = client
-        return phone_code_hash
-
-    # =========================
-    # Вход по коду
-    # =========================
     async def sign_in(
         self,
         user_id: int,
@@ -59,11 +87,17 @@ class AuthService:
         code: str,
         phone_code_hash: str
     ):
-        logger.info(f"[Auth] Попытка sign_in для user_id: {user_id}")
+        print(
+            f"[AUTH DEBUG] Sign-in started | user_id={user_id}",
+            flush=True
+        )
 
         client = self.temp_clients.get(user_id)
+
         if not client:
-            raise Exception(f"Auth session expired для user_id {user_id}")
+            raise Exception(
+                "Auth session expired. Request a new code."
+            )
 
         try:
             await client.sign_in(
@@ -76,42 +110,59 @@ class AuthService:
 
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
-                    select(UserSession).where(UserSession.bot_user_id == user_id)
-                )
-                user = result.scalar_one_or_none()
-
-                if not user:
-                    user = UserSession(
-                        bot_user_id=user_id,
-                        phone=phone,
-                        savemod_enabled=False
+                    select(UserSession).where(
+                        UserSession.user_id == user_id
                     )
-                    db.add(user)
+                )
 
-                user.session_string = session_string
+                user_session = result.scalar_one_or_none()
+
+                if user_session:
+                    user_session.session_string = session_string
+                else:
+                    user_session = UserSession(
+                        user_id=user_id,
+                        session_string=session_string
+                    )
+                    db.add(user_session)
+
                 await db.commit()
 
             self.temp_clients.pop(user_id, None)
-            logger.info(f"[Auth] sign_in УСПЕШНО для user_id: {user_id}")
+            await client.disconnect()
+
+            logger.info(
+                "[Auth] Авторизация успешна для user_id=%s",
+                user_id
+            )
+
             return "OK"
 
         except SessionPasswordNeededError:
-            logger.info(f"[Auth] Требуется 2FA пароль для user_id: {user_id}")
+            logger.info(
+                "[Auth] Требуется пароль 2FA для user_id=%s",
+                user_id
+            )
             return "PASSWORD_REQUIRED"
 
         except Exception as e:
-            logger.error(f"[Auth] sign_in ошибка для user_id {user_id}: {e}")
+            logger.exception(
+                "[Auth] Ошибка авторизации user_id=%s",
+                user_id
+            )
             raise
 
-    # =========================
-    # Вход по паролю (2FA)
-    # =========================
-    async def sign_in_with_password(self, user_id: int, password: str):
-        logger.info(f"[Auth] Попытка sign_in_with_password для user_id: {user_id}")
-
+    async def sign_in_with_password(
+        self,
+        user_id: int,
+        password: str
+    ):
         client = self.temp_clients.get(user_id)
+
         if not client:
-            raise Exception(f"Auth session expired для 2FA user_id {user_id}")
+            raise Exception(
+                "Auth session expired. Request a new code."
+            )
 
         try:
             await client.sign_in(password=password)
@@ -120,25 +171,38 @@ class AuthService:
 
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
-                    select(UserSession).where(UserSession.bot_user_id == user_id)
-                )
-                user = result.scalar_one_or_none()
-
-                if not user:
-                    user = UserSession(
-                        bot_user_id=user_id,
-                        phone=None,
-                        savemod_enabled=False
+                    select(UserSession).where(
+                        UserSession.user_id == user_id
                     )
-                    db.add(user)
+                )
 
-                user.session_string = session_string
+                user_session = result.scalar_one_or_none()
+
+                if user_session:
+                    user_session.session_string = session_string
+                else:
+                    user_session = UserSession(
+                        user_id=user_id,
+                        session_string=session_string
+                    )
+                    db.add(user_session)
+
                 await db.commit()
 
             self.temp_clients.pop(user_id, None)
-            logger.info(f"[Auth] sign_in_with_password УСПЕШНО для user_id: {user_id}")
+            await client.disconnect()
+
+            logger.info(
+                "[Auth] Авторизация через 2FA успешна для user_id=%s",
+                user_id
+            )
+
             return "OK"
 
         except Exception as e:
-            logger.error(f"[Auth] sign_in_with_password ошибка для user_id {user_id}: {e}")
+            logger.exception(
+                "[Auth] Ошибка авторизации через 2FA user_id=%s",
+                user_id
+            )
             raise
+
