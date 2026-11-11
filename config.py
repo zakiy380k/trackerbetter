@@ -14,7 +14,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 WEBHOOK_PATH = "/telegram/webhook"
 
-WEB_APP_URL = "https://"
+WEB_APP_URL = "https://www.instagram.com/zxcursed/"
 
 LOCAL_TZ = timezone("Europe/Kyiv")
 UTC_TZ = UTC
