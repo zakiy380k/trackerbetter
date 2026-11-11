@@ -13,20 +13,21 @@ from aiogram.types import (
 )
 from sqlalchemy import select
 
-from config import BOT_TOKEN
+from config import BOT_TOKEN, WEB_APP_URL
 from db.models import UserBot, UserSession
 from db.session import AsyncSessionLocal
 from core import tasks, user_bot_service
+from bot.keyboards.code_keyboard import (
+    get_main_menu_keyboard,
+    get_profile_keyboard,
+    get_back_to_main_keyboard
+)
 
 router = Router()
 
 _session_manager = None
 _tracker_service = None
 _savemod_service = None  # Telethon SaveModService (full-режим)
-
-# MAIN_BOT_ID = int(BOT_TOKEN.split(":")[0])
-
-# router.message.filter(F.bot.id == MAIN_BOT_ID)
 
 def setup_start_handlers(shared_session_manager, tracker_service, savemod_service, user_bot_service):
     global _session_manager, _tracker_service, _savemod_service, _user_bot_service
@@ -36,41 +37,11 @@ def setup_start_handlers(shared_session_manager, tracker_service, savemod_servic
     _user_bot_service = user_bot_service
 
 
-# ─────────────────────── КЛАВИАТУРЫ ─────────────────────────── #
-
-def get_welcome_keyboard(user_id: int, username: str = None) -> InlineKeyboardMarkup:
-    profile_url = f"https://t.me/{username}" if username else f"tg://openmessage?user_id={user_id}"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Скопировать @username", copy_text=CopyTextButton(text="@TrackerZaki_Bot"))],
-        [InlineKeyboardButton(text="⚙ Профиль", url="tg://settings/")],
-        [InlineKeyboardButton(text="📕 Инструкция", url="https://teletype.in/@zakiiq/yJ1Gx4dEEV5")],
-        [InlineKeyboardButton(text="Подключиться через FullConnection", callback_data="agree")],
-        [InlineKeyboardButton(text="Создать своего бота", callback_data="create_bot")],
-    ])
-
-
-def get_profile_keyboard(user: UserSession) -> InlineKeyboardMarkup:
-    buttons = []
-
-    sm_text = "🔴 Выключить SaveMod" if user.savemod_enabled else "🟢 Включить SaveMod"
-    buttons.append(
-        [InlineKeyboardButton(text=sm_text, callback_data="toggle_savemod")])
-    buttons.append([InlineKeyboardButton(text="➕ Добавить бота", callback_data="create_bot")])
-
-    # Кнопка трекера только для full-режима и только если запущен
-    if getattr(user, 'connection_type', 'full') == "full" and tasks.is_tracker_running(user.bot_user_id):
-        buttons.append([InlineKeyboardButton(text="⏹️ Остановить Трекер", callback_data="stop_tracker")])
-
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
 # ─────────────────────── ПРОФИЛЬ ─────────────────────────── #
 
-# Обновленная функция формирования текста
 def _build_profile_text(user_id: int, user: UserSession, user_bots: list) -> str:
     sm_status = "🟢 Включен" if user.savemod_enabled else "🔴 Выключен"
     
-    # Формируем список ботов
     bots_list_text = "\n".join([f"• @{b.username}" for b in user_bots]) if user_bots else "<i>нет созданных ботов</i>"
     
     if getattr(user, 'connection_type', 'full') == "business":
@@ -110,10 +81,8 @@ async def safe_edit(message: Message, text: str, reply_markup=None):
 
 # ─────────────────────── /start ─────────────────────────── #
 
-
 @router.message(Command("start"))
 async def start_command_handler(message: Message):
-
     user_id = message.from_user.id
     username = message.from_user.username
 
@@ -128,8 +97,11 @@ async def start_command_handler(message: Message):
         )
         my_bots = result_bot.scalars().all()
 
+    app_url = getattr(WEB_APP_URL, 'value', None) if hasattr(WEB_APP_URL, 'value') else WEB_APP_URL
+    if not isinstance(app_url, str):
+        app_url = None
 
-    # Уже настроен — показываем профиль
+    # Уже настроен — показываем профиль с главным меню
     if user and (user.business_connection_id or user.session_string):
         await message.answer(
             _build_profile_text(user_id, user, my_bots),
@@ -137,9 +109,8 @@ async def start_command_handler(message: Message):
             parse_mode="HTML",
         )
         return
-    photo = FSInputFile("Png/starttutor.png")   # ← путь к файлу
-    # Новый пользователь — выбор режима
-    # Отправляем приветственное фото + текст
+
+    photo = FSInputFile("Png/starttutor.png")
     await message.answer_photo(
         photo=photo,
         caption=(
@@ -147,11 +118,56 @@ async def start_command_handler(message: Message):
             "Этот бот создан, чтобы дать тебе полный контроль над перепиской в Telegram.\n\n"
             "• Я присылаю уведомления, когда собеседник <b>удаляет или редактирует сообщения</b>.\n"
             "• При полном подключении я также <b>сохраняю самоуничтожающиеся фото, видео и голосовые сообщения</b>.\n\n"
-            "Что бы подключить бота, нажмите на кнопку <b>«Скопировать @username»</b> и следуйте инструкции ниже."
+            "Воспользуйся кнопками ниже для управления:"
         ),
-        reply_markup=get_welcome_keyboard(user_id=user_id, username=username),
+        reply_markup=get_main_menu_keyboard(web_app_url=app_url),
         parse_mode="HTML",
     )
+
+
+# ─────────────────────── НАВИГАЦИЯ МЕНЮ ─────────────────────── #
+
+@router.callback_query(F.data == "back_to_main")
+async def callback_back_to_main(call: CallbackQuery):
+    await call.answer()
+    user_id = call.from_user.id
+    
+    app_url = getattr(WEB_APP_URL, 'value', None) if hasattr(WEB_APP_URL, 'value') else WEB_APP_URL
+    if not isinstance(app_url, str):
+        app_url = None
+
+    await safe_edit(
+        call.message,
+        "🏠 <b>Главное меню</b>\n\nВыберите нужный раздел:",
+        get_main_menu_keyboard(web_app_url=app_url)
+    )
+
+
+@router.callback_query(F.data == "show_profile")
+async def callback_show_profile(call: CallbackQuery):
+    await call.answer()
+    user_id = call.from_user.id
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(UserSession).where(UserSession.bot_user_id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        
+        result_bot = await session.execute(
+            select(UserBot).where(UserBot.owner_id == user_id)
+        )
+        my_bots = result_bot.scalars().all()
+
+    if not user:
+        user = UserSession(bot_user_id=user_id, savemod_enabled=False)
+
+    await safe_edit(
+        call.message,
+        _build_profile_text(user_id, user, my_bots),
+        get_profile_keyboard(user)
+    )
+
 
 # ─────────────────────── ВЫБОР РЕЖИМА ─────────────────────── #
 
@@ -189,6 +205,7 @@ async def callback_mode_business(callback: CallbackQuery):
         InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📖 Инструкция", url="https://teletype.in/@zakiiq/7Kq-TRuW_8a")],
             [InlineKeyboardButton(text="🔄 Проверить подключение", callback_data="check_bc")],
+            [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_to_main")]
         ]),
     )
 
@@ -209,8 +226,8 @@ async def callback_check_bc(callback: CallbackQuery):
             callback.message,
             "✅ <b>Business Connection активен!</b>\n\n"
             "SaveMod работает — удалённые сообщения из бизнес-чатов "
-            "будут восстанавливаться и отправляться тебе.\n\n"
-            "Напиши /start чтобы открыть профиль.",
+            "будут восстанавливаться и отправляться тебе.",
+            get_back_to_main_keyboard()
         )
     else:
         await safe_edit(
@@ -221,6 +238,7 @@ async def callback_check_bc(callback: CallbackQuery):
             "После добавления нажми кнопку снова.",
             InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔄 Проверить снова", callback_data="check_bc")],
+                [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_to_main")]
             ]),
         )
 
@@ -229,7 +247,6 @@ async def callback_check_bc(callback: CallbackQuery):
 
 @router.business_connection()
 async def on_business_connection(bc: BusinessConnection):
-    """Срабатывает когда юзер подключает/отключает бота как бизнес-бота."""
     from core.business_savemod_service import get_service
 
     user_id = bc.user.id
@@ -255,7 +272,6 @@ async def on_business_connection(bc: BusinessConnection):
                 user.savemod_enabled = True
             await session.commit()
 
-            # register_connection — синхронный метод, await не нужен
             try:
                 get_service().register_connection(bc.id, user_id)
             except Exception as e:
@@ -266,14 +282,12 @@ async def on_business_connection(bc: BusinessConnection):
                     user_id,
                     "✅ <b>Business Connection подключён!</b>\n\n"
                     "SaveMod активирован — удалённые сообщения из бизнес-чатов "
-                    "будут восстанавливаться и отправляться тебе.\n\n"
-                    "Напиши /start для управления.",
+                    "будут восстанавливаться и отправляться тебе.",
                     parse_mode="HTML",
                 )
             except Exception as e:
                 print(f"[BC] Уведомление не доставлено {user_id}: {e}")
         else:
-            # Пользователь отключил бота
             if user:
                 user.business_connection_id = None
                 await session.commit()
@@ -298,6 +312,7 @@ async def callback_disclamer(callback: CallbackQuery):
         "если хотите юзайте, если нет — не юзайте. "
         "Я не храню ваши данные, не взламываю аккаунты. "
         "Если есть баги, предложения — пишите мне.",
+        get_back_to_main_keyboard()
     )
 
 
@@ -319,29 +334,30 @@ async def callback_toggle_savemod(callback: CallbackQuery):
         conn_type = getattr(user, 'connection_type', 'full')
 
         if conn_type == "full" and _savemod_service:
-            # Full-режим: SaveModService управляет Telethon-хендлерами
             if user.savemod_enabled:
                 await _savemod_service.disable(user_id)
             else:
                 await _savemod_service.enable(user_id)
-            # После enable/disable перечитываем актуальный статус из БД
             await session.refresh(user)
         else:
-            # Business-режим: просто флаг
             user.savemod_enabled = not user.savemod_enabled
             await session.commit()
 
-    # Перечитываем юзера для актуального текста профиля
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(UserSession).where(UserSession.bot_user_id == user_id)
         )
         user = result.scalar_one_or_none()
+        
+        result_bot = await session.execute(
+            select(UserBot).where(UserBot.owner_id == user_id)
+        )
+        my_bots = result_bot.scalars().all()
 
     if user:
         await safe_edit(
             callback.message,
-            _build_profile_text(user_id, user),
+            _build_profile_text(user_id, user, my_bots),
             get_profile_keyboard(user),
         )
 
@@ -358,11 +374,16 @@ async def callback_stop_tracker(callback: CallbackQuery):
                 select(UserSession).where(UserSession.bot_user_id == user_id)
             )
             user = result.scalar_one_or_none()
+            
+            result_bot = await session.execute(
+                select(UserBot).where(UserBot.owner_id == user_id)
+            )
+            my_bots = result_bot.scalars().all()
 
         if user:
             await safe_edit(
                 callback.message,
-                _build_profile_text(user_id, user),
+                _build_profile_text(user_id, user, my_bots),
                 get_profile_keyboard(user),
             )
     except Exception as e:
