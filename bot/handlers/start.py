@@ -1,5 +1,3 @@
-from tracemalloc import start
-
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import (
@@ -9,24 +7,46 @@ from aiogram.types import (
     InlineKeyboardButton,
     CallbackQuery,
     BusinessConnection,
-    CopyTextButton
+    CopyTextButton,
 )
 from sqlalchemy import select
 
-from config import BOT_TOKEN
 from db.models import UserBot, UserSession
 from db.session import AsyncSessionLocal
-from core import tasks, user_bot_service
+from core import tasks
 
 router = Router()
 
 _session_manager = None
 _tracker_service = None
-_savemod_service = None  # Telethon SaveModService (full-режим)
+_savemod_service = None
+_user_bot_service = None
 
-# MAIN_BOT_ID = int(BOT_TOKEN.split(":")[0])
+BOT_USERNAME_TAG = "@TrackerZaki_Bot"
 
-# router.message.filter(F.bot.id == MAIN_BOT_ID)
+WELCOME_TEXT = (
+    "👋 <b>Привет!</b>\n\n"
+    "Этот бот создан, чтобы дать тебе полный контроль над перепиской в Telegram.\n\n"
+    "• Я присылаю уведомления, когда собеседник <b>удаляет или редактирует сообщения</b>.\n"
+    "• <b>Присылаю медиа с огоньком</b>.\n\n"
+    "Нажми <b>«Подключить»</b>, чтобы выбрать способ подключения."
+)
+
+CONNECT_TEXT = (
+    "🔌 <b>Выбери способ подключения</b>\n\n"
+    "• <b>Business Connection</b> — быстро, безопасно.\n"
+    "• <b>Full Connection</b> — через сессии. Дает возможность мониторинг активности человека."
+)
+
+BUSINESS_TEXT = (
+    "💼 <b>Business Connection</b>\n\n"
+    "Короткая инструкция:\n"
+    "1. Нажми <b>«Скопировать @username»</b> ниже.\n"
+    "2. Открой <b>Настройки Telegram → Мой аккаунт → Изменить → Автоматизация чатов</b>.\n"
+    "3. Вставь <b>@TrackerZaki_Bot</b> и сохрани.\n\n"
+
+)
+
 
 def setup_start_handlers(shared_session_manager, tracker_service, savemod_service, user_bot_service):
     global _session_manager, _tracker_service, _savemod_service, _user_bot_service
@@ -38,14 +58,28 @@ def setup_start_handlers(shared_session_manager, tracker_service, savemod_servic
 
 # ─────────────────────── КЛАВИАТУРЫ ─────────────────────────── #
 
-def get_welcome_keyboard(user_id: int, username: str = None) -> InlineKeyboardMarkup:
-    profile_url = f"https://t.me/{username}" if username else f"tg://openmessage?user_id={user_id}"
+def get_welcome_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Скопировать @username", copy_text=CopyTextButton(text="@TrackerZaki_Bot"))],
-        [InlineKeyboardButton(text="⚙ Профиль", url="tg://settings/")],
+        [InlineKeyboardButton(text="🔌 Подключить", callback_data="open_connect")],
         [InlineKeyboardButton(text="📕 Инструкция", url="https://teletype.in/@zakiiq/yJ1Gx4dEEV5")],
-        [InlineKeyboardButton(text="Подключиться через FullConnection", callback_data="agree")],
-        [InlineKeyboardButton(text="Создать своего бота", callback_data="create_bot")],
+        [InlineKeyboardButton(text="🤖 Создать своего бота", callback_data="create_bot")],
+    ])
+
+
+def get_connect_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔐 Full Connection", callback_data="agree")],
+        [InlineKeyboardButton(text="💼 Business Connection", callback_data="mode_business")],
+        [InlineKeyboardButton(text="← Назад", callback_data="back_welcome")],
+    ])
+
+
+def get_business_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Скопировать @username", copy_text=CopyTextButton(text=BOT_USERNAME_TAG))],
+        [InlineKeyboardButton(text="⚙ Профиль", url="tg://settings/")],
+        [InlineKeyboardButton(text="🔄 Проверить подключение", callback_data="check_bc")],
+        [InlineKeyboardButton(text="← Назад", callback_data="open_connect")],
     ])
 
 
@@ -53,12 +87,10 @@ def get_profile_keyboard(user: UserSession) -> InlineKeyboardMarkup:
     buttons = []
 
     sm_text = "🔴 Выключить SaveMod" if user.savemod_enabled else "🟢 Включить SaveMod"
-    buttons.append(
-        [InlineKeyboardButton(text=sm_text, callback_data="toggle_savemod")])
+    buttons.append([InlineKeyboardButton(text=sm_text, callback_data="toggle_savemod")])
     buttons.append([InlineKeyboardButton(text="➕ Добавить бота", callback_data="create_bot")])
 
-    # Кнопка трекера только для full-режима и только если запущен
-    if getattr(user, 'connection_type', 'full') == "full" and tasks.is_tracker_running(user.bot_user_id):
+    if getattr(user, "connection_type", "full") == "full" and tasks.is_tracker_running(user.bot_user_id):
         buttons.append([InlineKeyboardButton(text="⏹️ Остановить Трекер", callback_data="stop_tracker")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -66,14 +98,11 @@ def get_profile_keyboard(user: UserSession) -> InlineKeyboardMarkup:
 
 # ─────────────────────── ПРОФИЛЬ ─────────────────────────── #
 
-# Обновленная функция формирования текста
 def _build_profile_text(user_id: int, user: UserSession, user_bots: list) -> str:
     sm_status = "🟢 Включен" if user.savemod_enabled else "🔴 Выключен"
-    
-    # Формируем список ботов
     bots_list_text = "\n".join([f"• @{b.username}" for b in user_bots]) if user_bots else "<i>нет созданных ботов</i>"
-    
-    if getattr(user, 'connection_type', 'full') == "business":
+
+    if getattr(user, "connection_type", "full") == "business":
         bc_status = "✅ Активно" if user.business_connection_id else "❌ Неактивно"
         profile_header = (
             "👤 <b>Твой профиль:</b>\n\n"
@@ -93,16 +122,20 @@ def _build_profile_text(user_id: int, user: UserSession, user_bots: list) -> str
         )
 
     return (
-        profile_header +
-        f"🤖 <b>Ваши боты ({len(user_bots)}):</b>\n"
-        f"{bots_list_text}\n\n"
-        "<b>@TrackerZaki_Bot</b>"
+        profile_header
+        + f"🤖 <b>Ваши боты ({len(user_bots)}):</b>\n"
+        + f"{bots_list_text}\n\n"
+        + "<b>@TrackerZaki_Bot</b>"
     )
 
+
 async def safe_edit(message: Message, text: str, reply_markup=None):
-    """Редактирует сообщение, игнорируя 'message is not modified'."""
+    """Редактирует текст или подпись к фото, игнорируя 'message is not modified'."""
     try:
-        await message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        if message.photo:
+            await message.edit_caption(caption=text, reply_markup=reply_markup, parse_mode="HTML")
+        else:
+            await message.edit_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
     except Exception as e:
         if "message is not modified" not in str(e).lower():
             print(f"[start] safe_edit error: {e}")
@@ -110,26 +143,21 @@ async def safe_edit(message: Message, text: str, reply_markup=None):
 
 # ─────────────────────── /start ─────────────────────────── #
 
-
 @router.message(Command("start"))
 async def start_command_handler(message: Message):
-
     user_id = message.from_user.id
-    username = message.from_user.username
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(UserSession).where(UserSession.bot_user_id == user_id)
         )
         user = result.scalar_one_or_none()
-        
+
         result_bot = await session.execute(
             select(UserBot).where(UserBot.owner_id == user_id)
         )
         my_bots = result_bot.scalars().all()
 
-
-    # Уже настроен — показываем профиль
     if user and (user.business_connection_id or user.session_string):
         await message.answer(
             _build_profile_text(user_id, user, my_bots),
@@ -137,23 +165,37 @@ async def start_command_handler(message: Message):
             parse_mode="HTML",
         )
         return
-    photo = FSInputFile("Png/starttutor.png")   # ← путь к файлу
-    # Новый пользователь — выбор режима
-    # Отправляем приветственное фото + текст
+
+    photo = FSInputFile("Png/starttutor.png")
     await message.answer_photo(
         photo=photo,
-        caption=(
-            "👋 <b>Привет!</b>\n\n"
-            "Этот бот создан, чтобы дать тебе полный контроль над перепиской в Telegram.\n\n"
-            "• Я присылаю уведомления, когда собеседник <b>удаляет или редактирует сообщения</b>.\n"
-            "• При полном подключении я также <b>сохраняю самоуничтожающиеся фото, видео и голосовые сообщения</b>.\n\n"
-            "Что бы подключить бота, нажмите на кнопку <b>«Скопировать @username»</b> и следуйте инструкции ниже."
-        ),
-        reply_markup=get_welcome_keyboard(user_id=user_id, username=username),
+        caption=WELCOME_TEXT,
+        reply_markup=get_welcome_keyboard(),
         parse_mode="HTML",
     )
 
-# ─────────────────────── ВЫБОР РЕЖИМА ─────────────────────── #
+
+# ─────────────────────── НАВИГАЦИЯ ПОДКЛЮЧЕНИЯ ─────────────────────── #
+
+@router.callback_query(F.data == "back_welcome")
+async def callback_back_welcome(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit(
+        callback.message,
+        WELCOME_TEXT,
+        get_welcome_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "open_connect")
+async def callback_open_connect(callback: CallbackQuery):
+    await callback.answer()
+    await safe_edit(
+        callback.message,
+        CONNECT_TEXT,
+        get_connect_keyboard(),
+    )
+
 
 @router.callback_query(F.data == "mode_business")
 async def callback_mode_business(callback: CallbackQuery):
@@ -179,17 +221,8 @@ async def callback_mode_business(callback: CallbackQuery):
 
     await safe_edit(
         callback.message,
-        "💼 <b>Business Connection</b>\n\n"
-        "Чтобы активировать SaveMod:\n\n"
-        "1. Открой <b>Настройки Telegram</b>\n"
-        "2. Перейди в <b>Telegram для бизнеса → Чат-боты</b>\n"
-        "3. Добавь <b>@TrackerZaki_Bot</b>\n\n"
-        "После подключения бот автоматически начнёт работать.\n\n"
-        "⚠️ Требуется <b>Telegram Premium</b>",
-        InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📖 Инструкция", url="https://teletype.in/@zakiiq/7Kq-TRuW_8a")],
-            [InlineKeyboardButton(text="🔄 Проверить подключение", callback_data="check_bc")],
-        ]),
+        BUSINESS_TEXT,
+        get_business_keyboard(),
     )
 
 
@@ -219,9 +252,7 @@ async def callback_check_bc(callback: CallbackQuery):
             "Убедись что добавил бота в:\n"
             "<b>Настройки → Telegram для бизнеса → Чат-боты</b>\n\n"
             "После добавления нажми кнопку снова.",
-            InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔄 Проверить снова", callback_data="check_bc")],
-            ]),
+            get_business_keyboard(),
         )
 
 
@@ -255,7 +286,6 @@ async def on_business_connection(bc: BusinessConnection):
                 user.savemod_enabled = True
             await session.commit()
 
-            # register_connection — синхронный метод, await не нужен
             try:
                 get_service().register_connection(bc.id, user_id)
             except Exception as e:
@@ -273,7 +303,6 @@ async def on_business_connection(bc: BusinessConnection):
             except Exception as e:
                 print(f"[BC] Уведомление не доставлено {user_id}: {e}")
         else:
-            # Пользователь отключил бота
             if user:
                 user.business_connection_id = None
                 await session.commit()
@@ -286,7 +315,7 @@ async def on_business_connection(bc: BusinessConnection):
                 pass
 
 
-# ─────────────────── ДИСКЛЕЙМЕР / AGREE ──────────────────── #
+# ─────────────────── ДИСКЛЕЙМЕР ──────────────────── #
 
 @router.callback_query(F.data == "disclamer")
 async def callback_disclamer(callback: CallbackQuery):
@@ -316,32 +345,33 @@ async def callback_toggle_savemod(callback: CallbackQuery):
         if not user:
             return
 
-        conn_type = getattr(user, 'connection_type', 'full')
+        conn_type = getattr(user, "connection_type", "full")
 
         if conn_type == "full" and _savemod_service:
-            # Full-режим: SaveModService управляет Telethon-хендлерами
             if user.savemod_enabled:
                 await _savemod_service.disable(user_id)
             else:
                 await _savemod_service.enable(user_id)
-            # После enable/disable перечитываем актуальный статус из БД
             await session.refresh(user)
         else:
-            # Business-режим: просто флаг
             user.savemod_enabled = not user.savemod_enabled
             await session.commit()
 
-    # Перечитываем юзера для актуального текста профиля
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(UserSession).where(UserSession.bot_user_id == user_id)
         )
         user = result.scalar_one_or_none()
 
+        result_bot = await session.execute(
+            select(UserBot).where(UserBot.owner_id == user_id)
+        )
+        my_bots = result_bot.scalars().all()
+
     if user:
         await safe_edit(
             callback.message,
-            _build_profile_text(user_id, user),
+            _build_profile_text(user_id, user, my_bots),
             get_profile_keyboard(user),
         )
 
@@ -359,10 +389,15 @@ async def callback_stop_tracker(callback: CallbackQuery):
             )
             user = result.scalar_one_or_none()
 
+            result_bot = await session.execute(
+                select(UserBot).where(UserBot.owner_id == user_id)
+            )
+            my_bots = result_bot.scalars().all()
+
         if user:
             await safe_edit(
                 callback.message,
-                _build_profile_text(user_id, user),
+                _build_profile_text(user_id, user, my_bots),
                 get_profile_keyboard(user),
             )
     except Exception as e:
