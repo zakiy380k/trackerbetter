@@ -230,7 +230,7 @@ async def safe_edit(message: Message, text: str, buttons=None):
     """Обновляет Rich Message, включая встроенные в него кнопки."""
     html = text
     if buttons:
-        html += "\\n\\n" + "\\n".join(buttons)
+        html += "".join(buttons)
 
     try:
         await message.bot(EditRichMessageText(
