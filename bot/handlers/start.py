@@ -270,6 +270,7 @@ async def start_command_handler(message: Message):
         my_bots = result_bot.scalars().all()
 
     if user and (user.business_connection_id or user.session_string):
+        # Профиль — обычный текст (здесь фото уже не нужно)
         await message.answer(
             _build_profile_text(user_id, user, my_bots),
             reply_markup=get_profile_keyboard(user),
@@ -277,6 +278,7 @@ async def start_command_handler(message: Message):
         )
         return
 
+    # Главный экран — всегда фото + caption + кнопки
     photo = FSInputFile("Png/starttutor.png")
     await message.answer_photo(
         photo=photo,
@@ -286,17 +288,15 @@ async def start_command_handler(message: Message):
     )
 
 
-# ─────────────────────── НАВИГАЦИЯ ПОДКЛЮЧЕНИЯ ─────────────────────── #
-
 @router.callback_query(F.data == "back_welcome")
 async def callback_back_welcome(callback: CallbackQuery):
     await callback.answer()
+    # Важно: редактируем caption → фото остаётся → кнопки снова "внутри"
     await safe_edit(
         callback.message,
         WELCOME_TEXT,
         get_welcome_keyboard(),
     )
-
 
 @router.callback_query(F.data == "open_connect")
 async def callback_open_connect(callback: CallbackQuery):
