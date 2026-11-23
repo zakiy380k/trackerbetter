@@ -36,13 +36,22 @@ class EditRichMessageText(TelegramMethod[Message]):
 
 
 async def send_rich_message(bot, chat_id: int, html: str, media=None):
-    rich_message = {"html": html}
+    rich_message = {
+        "html": html.replace("\n", "<br>")
+    }
+
     if media is not None:
         rich_message["media"] = [{
             "id": "start_cover",
             "media": {"type": "photo", "media": media},
         }]
-    return await bot(SendRichMessage(chat_id=chat_id, rich_message=rich_message))
+
+    return await bot(
+        SendRichMessage(
+            chat_id=chat_id,
+            rich_message=rich_message,
+        )
+    )
 
 
 def _rich_button(text: str, *, callback_data=None, url=None,
@@ -197,51 +206,74 @@ def get_profile_keyboard(user: UserSession) -> list[str]:
 
 def _build_profile_text(user_id: int, user: UserSession, user_bots: list) -> str:
     sm_status = "🟢 Включен" if user.savemod_enabled else "🔴 Выключен"
-    bots_list_text = "\n".join([f"• @{b.username}" for b in user_bots]) if user_bots else "<i>нет созданных ботов</i>"
+
+    bots_list_text = (
+        "\n".join([f"• @{b.username}" for b in user_bots])
+        if user_bots
+        else "<i>Нет созданных ботов</i>"
+    )
 
     if getattr(user, "connection_type", "full") == "business":
         bc_status = "✅ Активно" if user.business_connection_id else "❌ Неактивно"
-        profile_header = (
-            "👤 <b>Твой профиль:</b>\n\n"
-            f"🆔 ID: <code>{user_id}</code>\n"
-            f"💼 Режим: <b>Business Connection</b>\n"
-            f"🔗 Подключение: {bc_status}\n"
-            f"💾 SaveMod: {sm_status}\n\n"
+
+        connection_info = (
+            "💼 <b>Режим:</b> Business Connection\n"
+            f"🔗 <b>Подключение:</b> {bc_status}\n"
+            f"💾 <b>SaveMod:</b> {sm_status}"
         )
     else:
         tr_status = "🟢 Запущен" if tasks.is_tracker_running(user_id) else "🔴 Остановлен"
-        profile_header = (
-            "👤 <b>Твой профиль:</b>\n\n"
-            f"🆔 ID: <code>{user_id}</code>\n"
-            f"🔐 Режим: <b>Полный доступ</b>\n"
-            f"💾 SaveMod: {sm_status}\n"
-            f"📡 Tracker: {tr_status}\n\n"
+
+        connection_info = (
+            "🔐 <b>Режим:</b> Полный доступ\n"
+            f"💾 <b>SaveMod:</b> {sm_status}\n"
+            f"📡 <b>Tracker:</b> {tr_status}"
         )
 
     return (
-        profile_header
-        + f"🤖 <b>Ваши боты ({len(user_bots)}):</b>\n"
-        + f"{bots_list_text}\n\n"
-        + "<b>@TrackerZaki_Bot</b>"
+        "👤 <b>ТВОЙ ПРОФИЛЬ</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        f"🆔 <b>ID:</b> <code>{user_id}</code>\n\n"
+        f"{connection_info}\n\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        f"🤖 <b>ТВОИ БОТЫ ({len(user_bots)})</b>\n\n"
+        f"{bots_list_text}\n\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>@TrackerZaki_Bot</b>"
     )
 
 
-async def safe_edit(message: Message, text: str, buttons=None):
-    """Обновляет Rich Message, включая встроенные в него кнопки."""
+async def safe_edit(message: Message, text: str, buttons=None, media=None):
+    """Обновляет Rich Message, включая текст, кнопки и медиа."""
+
     html = text
+
     if buttons:
         html += "".join(buttons)
+
+    rich_message = {
+        "html": html.replace("\n", "<br>")
+    }
+
+    if media is not None:
+        rich_message["media"] = [{
+            "id": "start_cover",
+            "media": {
+                "type": "photo",
+                "media": media,
+            },
+        }]
 
     try:
         await message.bot(EditRichMessageText(
             chat_id=message.chat.id,
             message_id=message.message_id,
-            rich_message={"html": html},
+            rich_message=rich_message,
         ))
+
     except Exception as e:
         if "message is not modified" not in str(e).lower():
             print(f"[start] safe_edit error: {e}")
-
 
 # ─────────────────────── /start ─────────────────────────── #
 
@@ -283,11 +315,19 @@ async def start_command_handler(message: Message):
 @router.callback_query(F.data == "back_welcome")
 async def callback_back_welcome(callback: CallbackQuery):
     await callback.answer()
-    # Переключаем содержимое Rich Message вместе со встроенными кнопками.
+
+    photo = FSInputFile("Png/starttutor.png")
+
+    welcome_html = (
+        '<img src="tg://photo?id=start_cover"/>'
+        + WELCOME_TEXT
+    )
+
     await safe_edit(
         callback.message,
-        WELCOME_TEXT,
+        welcome_html,
         get_welcome_keyboard(),
+        media=photo,
     )
 
 @router.callback_query(F.data == "open_connect")
