@@ -24,6 +24,20 @@ _user_bot_service = None
 
 BOT_USERNAME_TAG = "@TrackerZaki_Bot"
 
+# Замените ID на свои custom_emoji_id из вашего эмодзи-пака
+EMOJI_CONNECT = "5312536423851630001"
+EMOJI_GUIDE = "5312536423851630002"
+EMOJI_CREATE_BOT = "5312536423851630003"
+EMOJI_FULL_CONN = "5312536423851630004"
+EMOJI_BIZ_CONN = "5312536423851630005"
+EMOJI_BACK = "5312536423851630006"
+EMOJI_COPY = "5312536423851630007"
+EMOJI_SETTINGS = "5312536423851630008"
+EMOJI_CHECK = "5312536423851630009"
+EMOJI_ON = "5312536423851630010"
+EMOJI_OFF = "5312536423851630011"
+EMOJI_STOP = "5312536423851630012"
+
 WELCOME_TEXT = (
     "👋 <b>Привет!</b>\n\n"
     "Этот бот создан, чтобы дать тебе полный контроль над перепиской в Telegram.\n\n"
@@ -44,7 +58,6 @@ BUSINESS_TEXT = (
     "1. Нажми <b>«Скопировать @username»</b> ниже.\n"
     "2. Открой <b>Настройки Telegram → Мой аккаунт → Изменить → Автоматизация чатов</b>.\n"
     "3. Вставь <b>@TrackerZaki_Bot</b> и сохрани.\n\n"
-
 )
 
 
@@ -60,38 +73,133 @@ def setup_start_handlers(shared_session_manager, tracker_service, savemod_servic
 
 def get_welcome_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔌 Подключить", callback_data="open_connect")],
-        [InlineKeyboardButton(text="📕 Инструкция", url="https://teletype.in/@zakiiq/yJ1Gx4dEEV5")],
-        [InlineKeyboardButton(text="🤖 Создать своего бота", callback_data="create_bot")],
+        [
+            InlineKeyboardButton(
+                text="Подключить",
+                callback_data="open_connect",
+                style="primary",
+                icon_custom_emoji_id=EMOJI_CONNECT,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Инструкция ↗",
+                url="https://teletype.in/@zakiiq/yJ1Gx4dEEV5",
+                style="success",
+                icon_custom_emoji_id=EMOJI_GUIDE,
+            ),
+            InlineKeyboardButton(
+                text="Создать бота",
+                callback_data="create_bot",
+                style="success",
+                icon_custom_emoji_id=EMOJI_CREATE_BOT,
+            ),
+        ],
     ])
 
 
 def get_connect_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔐 Full Connection", callback_data="agree")],
-        [InlineKeyboardButton(text="💼 Business Connection", callback_data="mode_business")],
-        [InlineKeyboardButton(text="← Назад", callback_data="back_welcome")],
+        [
+            InlineKeyboardButton(
+                text="Full Connection",
+                callback_data="agree",
+                style="primary",
+                icon_custom_emoji_id=EMOJI_FULL_CONN,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Business Connection",
+                callback_data="mode_business",
+                style="success",
+                icon_custom_emoji_id=EMOJI_BIZ_CONN,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Назад",
+                callback_data="back_welcome",
+                icon_custom_emoji_id=EMOJI_BACK,
+            )
+        ],
     ])
 
 
 def get_business_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Скопировать @username", copy_text=CopyTextButton(text=BOT_USERNAME_TAG))],
-        [InlineKeyboardButton(text="⚙ Профиль", url="tg://settings/")],
-        [InlineKeyboardButton(text="🔄 Проверить подключение", callback_data="check_bc")],
-        [InlineKeyboardButton(text="← Назад", callback_data="open_connect")],
+        [
+            InlineKeyboardButton(
+                text="Скопировать @username",
+                copy_text=CopyTextButton(text=BOT_USERNAME_TAG),
+                style="primary",
+                icon_custom_emoji_id=EMOJI_COPY,
+            ),
+            InlineKeyboardButton(
+                text="Профиль ↗",
+                url="tg://settings/",
+                style="primary",
+                icon_custom_emoji_id=EMOJI_SETTINGS,
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="Проверить подключение",
+                callback_data="check_bc",
+                style="success",
+                icon_custom_emoji_id=EMOJI_CHECK,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Назад",
+                callback_data="open_connect",
+                icon_custom_emoji_id=EMOJI_BACK,
+            )
+        ],
     ])
 
 
 def get_profile_keyboard(user: UserSession) -> InlineKeyboardMarkup:
     buttons = []
 
-    sm_text = "🔴 Выключить SaveMod" if user.savemod_enabled else "🟢 Включить SaveMod"
-    buttons.append([InlineKeyboardButton(text=sm_text, callback_data="toggle_savemod")])
-    buttons.append([InlineKeyboardButton(text="➕ Добавить бота", callback_data="create_bot")])
+    if user.savemod_enabled:
+        buttons.append([
+            InlineKeyboardButton(
+                text="Выключить SaveMod",
+                callback_data="toggle_savemod",
+                style="danger",
+                icon_custom_emoji_id=EMOJI_OFF,
+            )
+        ])
+    else:
+        buttons.append([
+            InlineKeyboardButton(
+                text="Включить SaveMod",
+                callback_data="toggle_savemod",
+                style="success",
+                icon_custom_emoji_id=EMOJI_ON,
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            text="Добавить бота",
+            callback_data="create_bot",
+            style="primary",
+            icon_custom_emoji_id=EMOJI_CREATE_BOT,
+        )
+    ])
 
     if getattr(user, "connection_type", "full") == "full" and tasks.is_tracker_running(user.bot_user_id):
-        buttons.append([InlineKeyboardButton(text="⏹️ Остановить Трекер", callback_data="stop_tracker")])
+        buttons.append([
+            InlineKeyboardButton(
+                text="Остановить Трекер",
+                callback_data="stop_tracker",
+                style="danger",
+                icon_custom_emoji_id=EMOJI_STOP,
+            )
+        ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
