@@ -140,12 +140,13 @@ def setup_start_handlers(shared_session_manager, tracker_service, savemod_servic
 def get_welcome_keyboard() -> list[str]:
     return [
         _button_row(
+            _rich_button("🔌 Подключить", callback_data="open_connect", style="primary"),
+        ),
+        _button_row(
             _rich_button("📖 Инструкция", url="https://teletype.in/@zakiiq/yJ1Gx4dEEV5", style="success"),
             _rich_button("🤖 Создать бота", callback_data="create_bot", style="success"),
         ),
-        _button_row(
-            _rich_button("🔌 Подключить", callback_data="open_connect", style="primary"),
-        ),
+
     ]
 
 
@@ -265,7 +266,7 @@ async def start_command_handler(message: Message):
             message.bot,
             message.chat.id,
             _build_profile_text(user_id, user, my_bots)
-            + "\\n\\n" + "\\n".join(get_profile_keyboard(user)),
+            + "".join(get_profile_keyboard(user)),
         )
         return
 
@@ -274,7 +275,7 @@ async def start_command_handler(message: Message):
     welcome_html = (
         '<img src="tg://photo?id=start_cover"/>'
         + WELCOME_TEXT
-        + "\\n\\n" + "\\n".join(get_welcome_keyboard())
+        + "".join(get_welcome_keyboard())
     )
     await send_rich_message(message.bot, message.chat.id, welcome_html, media=photo)
 
