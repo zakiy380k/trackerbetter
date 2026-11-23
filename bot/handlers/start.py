@@ -24,7 +24,8 @@ _user_bot_service = None
 
 BOT_USERNAME_TAG = "@TrackerZaki_Bot"
 
-# Замените ID на свои custom_emoji_id из вашего эмодзи-пака
+# Вставь сюда реальные custom_emoji_id (узнать можно через debug-хендлер выше).
+# Пока там заглушки — замени на свои ID, иначе Telegram вернёт ошибку DOCUMENT_INVALID.
 EMOJI_CONNECT = "5312536423851630001"
 EMOJI_GUIDE = "5312536423851630002"
 EMOJI_CREATE_BOT = "5312536423851630003"
@@ -39,25 +40,29 @@ EMOJI_OFF = "5312536423851630011"
 EMOJI_STOP = "5312536423851630012"
 
 WELCOME_TEXT = (
-    "👋 <b>Привет!</b>\n\n"
-    "Этот бот создан, чтобы дать тебе полный контроль над перепиской в Telegram.\n\n"
-    "• Я присылаю уведомления, когда собеседник <b>удаляет или редактирует сообщения</b>.\n"
-    "• <b>Присылаю медиа с огоньком</b>.\n\n"
-    "Нажми <b>«Подключить»</b>, чтобы выбрать способ подключения."
+    "🔥 <b>TrackerZaki</b> — полный контроль над перепиской в Telegram.\n\n"
+    "<blockquote>"
+    "• Мгновенно присылаю удалённые и отредактированные сообщения.\n"
+    "• Сохраняю сгорающие фото и видео с огоньком.\n"
+    "<i>Нажми «Подключить», чтобы выбрать режим работы.</i>"
+    "</blockquote>"
 )
 
 CONNECT_TEXT = (
     "🔌 <b>Выбери способ подключения</b>\n\n"
-    "• <b>Business Connection</b> — быстро, безопасно.\n"
-    "• <b>Full Connection</b> — через сессии. Дает возможность мониторинг активности человека."
+    "<blockquote>"
+    "• <b>Business Connection</b> — быстро, без входа в аккаунт.\n"
+    "• <b>Full Connection</b> — через сессию, с мониторингом онлайна."
+    "</blockquote>"
 )
 
 BUSINESS_TEXT = (
     "💼 <b>Business Connection</b>\n\n"
-    "Короткая инструкция:\n"
+    "<blockquote>"
     "1. Нажми <b>«Скопировать @username»</b> ниже.\n"
-    "2. Открой <b>Настройки Telegram → Мой аккаунт → Изменить → Автоматизация чатов</b>.\n"
-    "3. Вставь <b>@TrackerZaki_Bot</b> и сохрани.\n\n"
+    "2. Открой <b>Настройки → Telegram для бизнеса → Чат-боты</b>.\n"
+    "3. Вставь <b>@TrackerZaki_Bot</b> и нажми <b>«Проверить»</b>."
+    "</blockquote>"
 )
 
 
@@ -75,15 +80,7 @@ def get_welcome_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text="Подключить",
-                callback_data="open_connect",
-                style="primary",
-                icon_custom_emoji_id=EMOJI_CONNECT,
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="Инструкция ↗",
+                text="Инструкция",
                 url="https://teletype.in/@zakiiq/yJ1Gx4dEEV5",
                 style="success",
                 icon_custom_emoji_id=EMOJI_GUIDE,
@@ -93,6 +90,14 @@ def get_welcome_keyboard() -> InlineKeyboardMarkup:
                 callback_data="create_bot",
                 style="success",
                 icon_custom_emoji_id=EMOJI_CREATE_BOT,
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="Подключить",
+                callback_data="open_connect",
+                style="primary",
+                icon_custom_emoji_id=EMOJI_CONNECT,
             ),
         ],
     ])
@@ -106,7 +111,7 @@ def get_connect_keyboard() -> InlineKeyboardMarkup:
                 callback_data="agree",
                 style="primary",
                 icon_custom_emoji_id=EMOJI_FULL_CONN,
-            )
+            ),
         ],
         [
             InlineKeyboardButton(
@@ -114,14 +119,14 @@ def get_connect_keyboard() -> InlineKeyboardMarkup:
                 callback_data="mode_business",
                 style="success",
                 icon_custom_emoji_id=EMOJI_BIZ_CONN,
-            )
+            ),
         ],
         [
             InlineKeyboardButton(
                 text="Назад",
                 callback_data="back_welcome",
                 icon_custom_emoji_id=EMOJI_BACK,
-            )
+            ),
         ],
     ])
 
@@ -130,13 +135,13 @@ def get_business_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text="Скопировать @username",
+                text="Скопировать",
                 copy_text=CopyTextButton(text=BOT_USERNAME_TAG),
                 style="primary",
                 icon_custom_emoji_id=EMOJI_COPY,
             ),
             InlineKeyboardButton(
-                text="Профиль ↗",
+                text="Настройки",
                 url="tg://settings/",
                 style="primary",
                 icon_custom_emoji_id=EMOJI_SETTINGS,
@@ -148,14 +153,14 @@ def get_business_keyboard() -> InlineKeyboardMarkup:
                 callback_data="check_bc",
                 style="success",
                 icon_custom_emoji_id=EMOJI_CHECK,
-            )
+            ),
         ],
         [
             InlineKeyboardButton(
                 text="Назад",
                 callback_data="open_connect",
                 icon_custom_emoji_id=EMOJI_BACK,
-            )
+            ),
         ],
     ])
 
