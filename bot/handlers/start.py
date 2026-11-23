@@ -279,7 +279,7 @@ async def start_command_handler(message: Message):
         return
 
     # Главный экран — всегда фото + caption + кнопки
-    photo = FSInputFile("Png/starttutor.jpg")
+    photo = FSInputFile("Png/starttutor.png")
     await message.answer_photo(
         photo=photo,
         caption=WELCOME_TEXT,
