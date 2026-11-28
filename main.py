@@ -22,6 +22,7 @@ from db.session import AsyncSessionLocal
 from sqlalchemy import select
 from db.init_db import init_db   # ← Добавили импорт
 from db.cleanup import cleanup_loop
+from core.forum_group import forum_router
 
 # ====================== REDIS STORAGE ======================
 redis_url = os.getenv("REDIS_URL")
@@ -78,6 +79,8 @@ dp.include_router(terms.router)
 dp.include_router(auth.router)
 dp.include_router(tracker.router)
 dp.include_router(admin.router)
+dp.include_router(forum_router)
+
 # ====================== FASTAPI ======================
 app = FastAPI(title="TrackerZaki Bot")
 
