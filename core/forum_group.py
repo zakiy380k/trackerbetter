@@ -76,12 +76,12 @@ async def cmd_set_forum(message: Message, command: CommandObject, bot: Bot):
                 savemod_enabled=True,
                 connection_type="business",
                 custom_forum_chat_id=target_chat_id,
-                custom_forum_enabled=True,
+                custom_forum_enable=True,
             )
             session.add(user_session)
         else:
             user_session.custom_forum_chat_id = target_chat_id
-            user_session.custom_forum_enabled = True
+            user_session.custom_forum_enable = True
 
         await session.commit()
 
@@ -106,7 +106,7 @@ async def cmd_unset_forum(message: Message):
         )
         user_session = res.scalar_one_or_none()
         if user_session:
-            user_session.custom_forum_enabled = False
+            user_session.custom_forum_enable = False
             user_session.custom_forum_chat_id = None
             await session.commit()
 
