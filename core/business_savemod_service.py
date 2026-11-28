@@ -119,7 +119,7 @@ class BusinessSaveModService:
         if media_type == 'video_note':
             sent = await bot.send_video_note(chat_id, video_note=upload)
             try:
-                await bot.send_message(chat_id, caption, parse_mode='HTML', reply_to_message_id=sent.message_id,link_preview_options=LinkPreviewOptions(is_disabled=True) )
+                await bot.send_message(chat_id, caption, parse_mode='HTML', reply_to_message_id=sent.message_id, link_preview_options=LinkPreviewOptions(is_disabled=True))
             except (TelegramAPIError, ClientError, OSError, asyncio.TimeoutError):
                 logger.warning('[ReplyMedia] Не удалось отправить подпись к кружку')
             return sent
@@ -211,7 +211,7 @@ class BusinessSaveModService:
                 sender_id = sender.id if sender else (sender_chat.id if sender_chat else None)
                 sender_name = sender.full_name if sender else (sender_chat.title if sender_chat else 'Неизвестно')
                 owner_name = connection.user.full_name
-                
+
                 # 1. Текст для архивного канала (оставляем техническим)
                 archive_caption = (
                     '🔥 <b>САМОУНИЧТОЖАЮЩЕЕСЯ МЕДИА</b>\n'
@@ -240,13 +240,13 @@ class BusinessSaveModService:
                     )
                 except (TelegramAPIError, ClientError, OSError, asyncio.TimeoutError):
                     return
-                
+
                 # Сохраняем в кэш и архивный объект, и user_caption
                 cached = {'archive': archived, 'caption': user_caption, 'delivered': False}
                 self._reply_media_saved[key] = cached
                 if len(self._reply_media_saved) > 1000:
                     self._reply_media_saved.popitem(last=False)
-                
+
                 # Доставляем владельцу с вашим красивым user_caption
                 cached['delivered'] = await self._deliver_reply_media(
                     archived, owner_id, download_bot, media_type, user_caption, raw=raw,
@@ -301,14 +301,14 @@ class BusinessSaveModService:
         """Получает имя чата через переданного активного бота (или главного бота)"""
         if not entity_id:
             return "Неизвестно"
-    
+
         if entity_id in self._names_cache:
             return self._names_cache[entity_id]
-    
+
         active_bot = bot or self.bot
         try:
             chat = await active_bot.get_chat(entity_id)
-    
+
             if chat.full_name:
                 name = chat.full_name
             elif chat.title:
@@ -319,14 +319,14 @@ class BusinessSaveModService:
                 first = chat.first_name or ""
                 last = chat.last_name or ""
                 name = (first + " " + last).strip()
-    
+
             if not name:
                 name = f"ID:{entity_id}"
-    
+
         except Exception as e:
             print(f"[get_entity_name] ошибка: {e}")
             name = f"ID:{entity_id}"
-    
+
         self._names_cache[entity_id] = name
         return name
 
@@ -372,27 +372,28 @@ class BusinessSaveModService:
             out += "=" * 60 + "\n\n"
 
         return out
+
     async def format_logs_to_html(self, owner_id: int, bot: Bot = None) -> str | None:
         logs = await self.get_user_logs(owner_id)
         if not logs:
             return None
-    
+
         grouped = {}
-    
+
         for log in logs:
             grouped.setdefault(log.chat_id, []).append(log)
-    
+
         chats = []
-    
+
         for chat_id, chat_logs in grouped.items():
             chat_name = await self.get_entity_name(chat_id, bot)
-    
+
             messages = []
-    
+
             for log in sorted(chat_logs, key=lambda x: x.date or 0):
-            
+
                 sender_name = await self.get_entity_name(log.sender_id, bot)
-    
+
                 messages.append({
                     "sender": sender_name,
                     "is_me": log.sender_id == owner_id,
@@ -402,29 +403,30 @@ class BusinessSaveModService:
                     ).strftime("%d.%m.%Y %H:%M") if log.date else "",
                     "media": bool(log.file_id)
                 })
-    
+
             chats.append({
                 "id": chat_id,
                 "name": chat_name,
                 "messages": messages
             })
-    
+
         env = Environment(
             loader=FileSystemLoader(
                 os.path.join(os.getcwd(), "templates")
             ),
             autoescape=True
         )
-    
+
         template = env.get_template("logs.html")
-    
+
         html = template.render(
             generated=datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
             owner=owner_id,
             chats=chats
         )
-    
+
         return html
+
     def _detect_media_type(self, message: Message) -> str | None:
         if message.video_note:    return "video_note"
         if message.photo:         return "photo"
@@ -524,17 +526,27 @@ class BusinessSaveModService:
             await bot.send_message(owner_id, info_text, parse_mode="HTML")
             return
 
+        # Голосовое (voice) отправляем одним сообщением с подписью (caption), без отдельного текстового сообщения.
+        try:
+            await bot.send_voice(owner_id, voice=saved.file_id, caption=info_text, parse_mode="HTML")
+            return
+        except Exception as e:
+            err = str(e).lower()
+            if not any(k in err for k in ["wrong type", "type", "invalid remote file"]):
+                print(f"[BusinessSaveMod] Не удалось переслать voice: {e}")
+                await bot.send_message(owner_id, info_text, parse_mode="HTML")
+                return
+
         try:
             await bot.send_video_note(owner_id, video_note=saved.file_id)
             await bot.send_message(owner_id, info_text, parse_mode="HTML")
             return
-        except Exception as e:
+        except Exception:
             pass
 
         send_order = [
             ("send_photo",    {"photo":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
             ("send_video",    {"video":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
-            ("send_voice",    {"voice":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
             ("send_audio",    {"audio":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
             ("send_document", {"document": saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
         ]
@@ -551,7 +563,6 @@ class BusinessSaveModService:
                 print(f"[BusinessSaveMod] Не удалось переслать медиа ({method_name}): {e}")
                 break
 
-        # Кружок
         await bot.send_message(owner_id, info_text, parse_mode="HTML")
 
     # ─────────────────── ОСНОВНАЯ ЛОГИКА ─────────────────── #
@@ -565,7 +576,7 @@ class BusinessSaveModService:
         await self._save_reply_media(message, owner_id)
 
         if await self._get_saved(owner_id, message.chat.id, message.message_id):
-            return  
+            return
 
         text = message.text or message.caption or ""
         is_ttl = self._check_ttl(message)
@@ -691,7 +702,6 @@ class BusinessSaveModService:
 
             safe_text = escape(saved.text or '')
 
-
             info_text = (
                 f"🗑 <b>Удалённое сообщение</b>\n\n"
                 f"<blockquote>"
@@ -740,6 +750,23 @@ class BusinessSaveModService:
                     forum_chat_id, message_thread_id=thread_id, text=info_text, parse_mode="HTML"
                 )
 
+            # Голосовое (voice) отправляем одним сообщением с подписью (caption), без второго текстового сообщения.
+            try:
+                return await self.bot.send_voice(
+                    forum_chat_id,
+                    message_thread_id=thread_id,
+                    voice=saved.file_id,
+                    caption=info_text,
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                err = str(e).lower()
+                if not any(k in err for k in ["wrong type", "type", "invalid remote file"]):
+                    print(f"[BusinessSaveMod] Не удалось отправить voice в форум: {e}")
+                    return await self.bot.send_message(
+                        forum_chat_id, message_thread_id=thread_id, text=info_text, parse_mode="HTML"
+                    )
+
             try:
                 m = await self.bot.send_video_note(
                     forum_chat_id, message_thread_id=thread_id, video_note=saved.file_id
@@ -754,7 +781,6 @@ class BusinessSaveModService:
             send_order = [
                 ("send_photo",    {"photo":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
                 ("send_video",    {"video":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
-                ("send_voice",    {"voice":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
                 ("send_audio",    {"audio":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
                 ("send_document", {"document": saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
             ]
@@ -783,6 +809,8 @@ class BusinessSaveModService:
             user_name=topic_user_name,
             send_fn=_send,
         )
+
+
 # ─────────────────── ГЛОБАЛЬНЫЙ ЭКЗЕМПЛЯР ─────────────────── #
 
 _service: BusinessSaveModService | None = None
