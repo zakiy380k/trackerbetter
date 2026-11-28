@@ -86,6 +86,8 @@ class _ReplyMediaBuffer(BytesIO):
 
 class BusinessSaveModService:
     def __init__(self, bot: Bot):
+        from core.forum_topics import ForumTopicManager
+        self.topics = ForumTopicManager(bot)
         self.bot = bot  # Это Главный бот (используется как fallback и для лог-канала)
         self._registry: dict[str, int] = {}     # bc_id → owner_id
         self._names_cache: dict[int, str] = {}  # entity_id → name
