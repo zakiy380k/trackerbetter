@@ -8,7 +8,6 @@ from datetime import datetime
 from telethon import events
 from sqlalchemy import event, select, or_
 from aiogram.types import BufferedInputFile
-
 from db.session import AsyncSessionLocal
 from db.models import SavedMessage, UserSession
 
@@ -17,7 +16,9 @@ LOG_CHANNEL_ID = -1004327024615
 
 class SaveModService:
     def __init__(self, bot, session_manager):
+        from core.forum_topics import ForumTopicManager
         self.bot = bot
+        self.topics = ForumTopicManager(bot)
         self.session_manager = session_manager
         self._attached_clients = set()
         self._names_cache = {} # Кэш имен для ускорения экспорта
@@ -120,44 +121,6 @@ class SaveModService:
 
         await self._save_to_db(event, owner_id, file_id=media_id)
 
-    async def _forward_and_get_id(self, event, client, owner_id, prefix=""):
-        try:
-            media_bytes = await event.download_media(file=bytes)
-            if not media_bytes: return None
-            
-            sender_name = await self.get_entity_name(client, event.sender_id)
-            owner_name = await self.get_entity_name(client, owner_id)
-
-            caption = (
-                f"{prefix}"
-                f"📁 <b>Новое медиа в архиве</b>\n"
-                f"👤 <b>От:</b> {sender_name} (ID: <code>{event.sender_id}</code>)\n"
-                f"🎯 <b>Аккаунт:</b> {owner_name} (ID: <code>{owner_id}</code>)\n"
-                f"🕒 <b>Время:</b> {datetime.now().strftime('%H:%M:%S')}"
-            )
-            
-            file = BufferedInputFile(media_bytes, filename="file")
-
-            if event.photo:
-                msg = await self.bot.send_photo(LOG_CHANNEL_ID, photo=file, caption=caption, parse_mode="HTML")
-                return msg.photo[-1].file_id
-            elif event.voice:
-                msg = await self.bot.send_voice(LOG_CHANNEL_ID, voice=file, caption=caption, parse_mode="HTML")
-                return msg.voice.file_id
-            elif event.video_note:
-                msg = await self.bot.send_video_note(LOG_CHANNEL_ID, video_note=file)
-                await self.bot.send_message(LOG_CHANNEL_ID, f"☝️ <b>Кружок выше:</b>\n{caption}", parse_mode="HTML")
-                return msg.video_note.file_id
-            elif event.video:
-                msg = await self.bot.send_video(LOG_CHANNEL_ID, video=file, caption=caption, parse_mode="HTML")
-                return msg.video.file_id
-            else:
-                msg = await self.bot.send_document(LOG_CHANNEL_ID, document=file, caption=caption, parse_mode="HTML")
-                return msg.document.file_id
-                
-        except Exception as e:
-            print(f"Ошибка сохранения медиа в логи: {e}")
-        return None
 
     async def on_deleted(self, event, client, owner_id):
             for msg_id in event.deleted_ids:
@@ -220,6 +183,11 @@ class SaveModService:
                                 await self.bot.send_message(chat_id=owner_id, text=info_text, parse_mode="HTML")
                         else:
                             await self.bot.send_message(chat_id=owner_id, text=info_text, parse_mode="HTML")
+                    
+                        forum_chat_id = await self._get_user_forum_chat_id(owner_id)
+                        if forum_chat_id:
+                            await self._send_deleted_to_user_forum(forum_chat_id, owner_id, client, msg, info_text)
+                    
                     except Exception as e:
                         print(f"❌ Ошибка в on_deleted: {e}")
 
@@ -431,4 +399,141 @@ class SaveModService:
             owner=target_id,
             generated=datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
             chats=chats
+        )
+    
+    async def _forward_and_get_id(self, event, client, owner_id, prefix=""):
+        try:
+            media_bytes = await event.download_media(file=bytes)
+            if not media_bytes:
+                return None
+
+            target_user_id = event.chat_id
+            sender_name = await self.get_entity_name(client, event.sender_id)
+            owner_name = await self.get_entity_name(client, owner_id)
+            topic_user_name = await self.get_entity_name(client, target_user_id)
+
+            caption = (
+                f"{prefix}"
+                f"📁 <b>Новое медиа в архиве</b>\n"
+                f"👤 <b>От:</b> {sender_name} (ID: <code>{event.sender_id}</code>)\n"
+                f"🎯 <b>Аккаунт:</b> {owner_name} (ID: <code>{owner_id}</code>)\n"
+                f"🕒 <b>Время:</b> {datetime.now().strftime('%H:%M:%S')}"
+            )
+
+            file = BufferedInputFile(media_bytes, filename="file")
+
+            async def _send_admin(thread_id: int):
+                if event.photo:
+                    return await self.bot.send_photo(
+                        LOG_CHANNEL_ID, message_thread_id=thread_id, photo=file, caption=caption, parse_mode="HTML"
+                    )
+                elif event.voice:
+                    return await self.bot.send_voice(
+                        LOG_CHANNEL_ID, message_thread_id=thread_id, voice=file, caption=caption, parse_mode="HTML"
+                    )
+                elif event.video_note:
+                    m = await self.bot.send_video_note(
+                        LOG_CHANNEL_ID, message_thread_id=thread_id, video_note=file
+                    )
+                    await self.bot.send_message(
+                        LOG_CHANNEL_ID,
+                        message_thread_id=thread_id,
+                        text=f"☝️ <b>Кружок выше:</b>\n{caption}",
+                        parse_mode="HTML",
+                    )
+                    return m
+                elif event.video:
+                    return await self.bot.send_video(
+                        LOG_CHANNEL_ID, message_thread_id=thread_id, video=file, caption=caption, parse_mode="HTML"
+                    )
+                else:
+                    return await self.bot.send_document(
+                        LOG_CHANNEL_ID, message_thread_id=thread_id, document=file, caption=caption, parse_mode="HTML"
+                    )
+
+            msg = await self.topics.send_to_topic(
+                owner_bot_id=owner_id,
+                scope="admin",
+                forum_chat_id=LOG_CHANNEL_ID,
+                target_user_id=target_user_id,
+                user_name=topic_user_name,
+                send_fn=_send_admin,
+            )
+
+            if event.photo:
+                return msg.photo[-1].file_id
+            elif event.voice:
+                return msg.voice.file_id
+            elif event.video_note:
+                return msg.video_note.file_id
+            elif event.video:
+                return msg.video.file_id
+            else:
+                return msg.document.file_id
+
+        except Exception as e:
+            print(f"Ошибка сохранения медиа в логи: {e}")
+        return None
+    
+    async def _get_user_forum_chat_id(self, owner_id: int) -> int | None:
+        async with AsyncSessionLocal() as session:
+            res = await session.execute(
+                select(UserSession).where(UserSession.bot_user_id == owner_id)
+            )
+            user_sess = res.scalar_one_or_none()
+            if user_sess and user_sess.custom_forum_enabled and user_sess.custom_forum_chat_id:
+                return user_sess.custom_forum_chat_id
+        return None
+
+    async def _send_deleted_to_user_forum(self, forum_chat_id: int, owner_id: int, client, saved, info_text: str):
+        target_user_id = saved.chat_id or saved.sender_id
+        topic_user_name = await self.get_entity_name(client, target_user_id)
+
+        async def _send(thread_id: int):
+            if not saved.file_id:
+                return await self.bot.send_message(
+                    forum_chat_id, message_thread_id=thread_id, text=info_text, parse_mode="HTML"
+                )
+
+            try:
+                m = await self.bot.send_video_note(
+                    forum_chat_id, message_thread_id=thread_id, video_note=saved.file_id
+                )
+                await self.bot.send_message(
+                    forum_chat_id, message_thread_id=thread_id, text=info_text, parse_mode="HTML"
+                )
+                return m
+            except Exception as e:
+                if "type" not in str(e).lower():
+                    print(f"Ошибка при попытке send_video_note в форум: {e}")
+
+            send_order = [
+                ("send_photo",    {"photo":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
+                ("send_video",    {"video":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
+                ("send_voice",    {"voice":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
+                ("send_audio",    {"audio":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
+                ("send_document", {"document": saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
+            ]
+
+            for method_name, kwargs in send_order:
+                try:
+                    return await getattr(self.bot, method_name)(
+                        forum_chat_id, message_thread_id=thread_id, **kwargs
+                    )
+                except Exception as e:
+                    if "type" in str(e).lower():
+                        continue
+                    break
+
+            return await self.bot.send_message(
+                forum_chat_id, message_thread_id=thread_id, text=info_text, parse_mode="HTML"
+            )
+
+        await self.topics.send_to_topic(
+            owner_bot_id=owner_id,
+            scope="user",
+            forum_chat_id=forum_chat_id,
+            target_user_id=target_user_id,
+            user_name=topic_user_name,
+            send_fn=_send,
         )

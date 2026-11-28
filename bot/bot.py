@@ -22,6 +22,7 @@ from aiogram.fsm.storage.redis import RedisStorage
 from sqlalchemy import select
 from db.models import UserSession
 from db.session import AsyncSessionLocal
+from core.forum_group import forum_router
 
 redis_url = os.getenv("REDIS_URL")
 
@@ -86,6 +87,7 @@ async def main():
 
     dp.include_router(user_bot_router)
 
+    dp.include_router(forum_router)
 
 
     # 6. Инициализация БД

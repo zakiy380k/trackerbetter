@@ -668,6 +668,7 @@ class BusinessSaveModService:
         owner_id = self.get_owner(bc_id)
         if not owner_id or not await self._is_savemod_active(owner_id):
             return
+        forum_chat_id = await self._get_user_forum_chat_id(owner_id)
 
         for msg_id in event.message_ids:
             saved = await self._get_saved(owner_id, event.chat.id, msg_id)
@@ -700,8 +701,86 @@ class BusinessSaveModService:
 
             # 🔥 Передаем event.bot для отправки медиа/текста
             await self._send_deleted_to_user(owner_id, saved, info_text, bot=event.bot)
+            if forum_chat_id:
+                await self._send_deleted_to_user_forum(
+                    forum_chat_id=forum_chat_id,
+                    owner_id=owner_id,
+                    target_user_id=saved.chat_id or event.chat.id,
+                    saved=saved,
+                    info_text=info_text,
+                    active_bot=event.bot,
+                )
 
+    async def _get_user_forum_chat_id(self, owner_id: int) -> int | None:
+        async with AsyncSessionLocal() as session:
+            res = await session.execute(
+                select(UserSession).where(UserSession.bot_user_id == owner_id)
+            )
+            user_sess = res.scalar_one_or_none()
+            if user_sess and user_sess.custom_forum_enabled and user_sess.custom_forum_chat_id:
+                return user_sess.custom_forum_chat_id
+        return None
 
+    async def _send_deleted_to_user_forum(
+        self,
+        forum_chat_id: int,
+        owner_id: int,
+        target_user_id: int,
+        saved: SavedMessage,
+        info_text: str,
+        active_bot: Bot,
+    ):
+        topic_user_name = await self.get_entity_name(target_user_id, bot=active_bot)
+
+        async def _send(thread_id: int):
+            if not saved.file_id:
+                return await self.bot.send_message(
+                    forum_chat_id, message_thread_id=thread_id, text=info_text, parse_mode="HTML"
+                )
+
+            try:
+                m = await self.bot.send_video_note(
+                    forum_chat_id, message_thread_id=thread_id, video_note=saved.file_id
+                )
+                await self.bot.send_message(
+                    forum_chat_id, message_thread_id=thread_id, text=info_text, parse_mode="HTML"
+                )
+                return m
+            except Exception:
+                pass
+
+            send_order = [
+                ("send_photo",    {"photo":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
+                ("send_video",    {"video":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
+                ("send_voice",    {"voice":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
+                ("send_audio",    {"audio":    saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
+                ("send_document", {"document": saved.file_id, "caption": info_text, "parse_mode": "HTML"}),
+            ]
+
+            for method_name, kwargs in send_order:
+                try:
+                    return await getattr(self.bot, method_name)(
+                        forum_chat_id, message_thread_id=thread_id, **kwargs
+                    )
+                except Exception as e:
+                    err = str(e).lower()
+                    if any(k in err for k in ["wrong type", "type", "invalid remote file"]):
+                        continue
+                    print(f"[BusinessSaveMod] Не удалось отправить в форум ({method_name}): {e}")
+                    break
+
+            return await self.bot.send_message(
+                forum_chat_id, message_thread_id=thread_id, text=info_text, parse_mode="HTML"
+            )
+
+        await self.topics.send_to_topic(
+            owner_bot_id=owner_id,
+            scope="user",
+            forum_chat_id=forum_chat_id,
+            target_user_id=target_user_id,
+            user_name=topic_user_name,
+            send_fn=_send,
+        )
 # ─────────────────── ГЛОБАЛЬНЫЙ ЭКЗЕМПЛЯР ─────────────────── #
 
 _service: BusinessSaveModService | None = None

@@ -9,7 +9,8 @@ from sqlalchemy import (
     Text,
     ForeignKey,
     DateTime,
-    func,          
+    func,        
+    UniqueConstraint,  
 )
 from db.base import Base
 
@@ -37,6 +38,23 @@ class UserSession(Base):
     # ID бизнес-подключения (только для connection_type == "business")
     business_connection_id = Column(String, nullable=True, index=True)
 
+    custom_forum_chat_id = Column(BigInteger, nullable=True, index=True)
+    custom_forum_enable = Column(Boolean, default=False, nullable=True)
+
+
+class UserForumTopic(Base):
+    __tablename__ = "user_forum_topics"
+    __table_args__ = (
+        UniqueConstraint("owner_bot_id","scope","target_user_id", name="uq_owner_scope_target_user"),
+
+    )
+
+    id = Column(Integer, primary_key=True)
+    owner_bot_id = Column(BigInteger, ForeignKey("user_session.bot_user_id"), index=True, nullable=False)
+    scope = Column(String, nullable=False)
+    forum_chat_id = Column(BigInteger, nullable=False)
+    target_user_id = Column(BigInteger, index=True, nullable=False)
+    message_thread_id = Column(Integer, nullable=False)
 
 class SavedMessage(Base):
     __tablename__ = "saved_messages"
@@ -96,3 +114,5 @@ class UserBot(Base):
 
     def __repr__(self):
         return f"<UserBot {self.username} (owner={self.owner_id})>"
+
+
