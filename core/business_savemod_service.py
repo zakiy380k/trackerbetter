@@ -717,7 +717,7 @@ class BusinessSaveModService:
                 select(UserSession).where(UserSession.bot_user_id == owner_id)
             )
             user_sess = res.scalar_one_or_none()
-            if user_sess and user_sess.custom_forum_enabled and user_sess.custom_forum_chat_id:
+            if user_sess and user_sess.custom_forum_enable and user_sess.custom_forum_chat_id:
                 return user_sess.custom_forum_chat_id
         return None
 
